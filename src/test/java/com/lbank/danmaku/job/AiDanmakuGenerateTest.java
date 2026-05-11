@@ -1,6 +1,6 @@
 package com.lbank.danmaku.job;
 
-import com.lbank.danmaku.job.client.QianwenAiDanmakuClient;
+import com.lbank.danmaku.job.client.OpenAiCompatibleDanmakuClient;
 import com.lbank.danmaku.job.config.DanmakuProperties;
 import com.lbank.danmaku.job.domain.TgRawMessage;
 import com.lbank.danmaku.job.dto.AiDanmakuResult;
@@ -16,38 +16,47 @@ import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * 千问百炼弹幕生成集成测试。
+ * AI 弹幕生成集成测试（OpenAI 兼容接口）。
  *
  * 运行前需设置环境变量：
- *   export DASHSCOPE_API_KEY=sk-xxx
+ *   export AI_API_KEY=sk-xxx
+ *   export AI_BASE_URL=https://...  （可选，默认读取 application.yml）
  * 或通过 Maven 传入：
- *   mvn test -DDASHSCOPE_API_KEY=sk-xxx -Dtest=AiDanmakuGenerateTest
+ *   mvn test -DAI_API_KEY=sk-xxx -Dtest=AiDanmakuGenerateTest
  */
 class AiDanmakuGenerateTest {
 
     static AiDanmakuService aiService;
-    static String apiKey;
 
     @BeforeAll
     static void setup() {
-        apiKey = System.getenv("DASHSCOPE_API_KEY");
+        String apiKey = System.getenv("AI_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
-            apiKey = System.getProperty("DASHSCOPE_API_KEY");
+            apiKey = System.getProperty("AI_API_KEY");
         }
         Assumptions.assumeTrue(apiKey != null && !apiKey.isBlank(),
-                "跳过测试：未配置 DASHSCOPE_API_KEY");
+                "跳过测试：未配置 AI_API_KEY");
+
+        String baseUrl = System.getenv("AI_BASE_URL");
+        if (baseUrl == null || baseUrl.isBlank()) {
+            baseUrl = System.getProperty("AI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1");
+        }
+        String model = System.getenv("AI_MODEL");
+        if (model == null || model.isBlank()) {
+            model = System.getProperty("AI_MODEL", "qwen-turbo");
+        }
 
         DanmakuProperties props = new DanmakuProperties();
-        props.getAi().setBaseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1");
+        props.getAi().setBaseUrl(baseUrl);
         props.getAi().setApiKey(apiKey);
-        props.getAi().setModel("qwen-turbo");
+        props.getAi().setModel(model);
         props.getAi().setTemperature(0.4);
         props.getAi().setResponseFormat("json_object");
 
         RestTemplate restTemplate = new RestTemplateBuilder().build();
         ObjectMapper objectMapper = new ObjectMapper();
 
-        QianwenAiDanmakuClient client = new QianwenAiDanmakuClient(props, restTemplate, objectMapper);
+        OpenAiCompatibleDanmakuClient client = new OpenAiCompatibleDanmakuClient(props, restTemplate, objectMapper);
         aiService = new AiDanmakuService(client, props, objectMapper);
     }
 
@@ -128,7 +137,6 @@ class AiDanmakuGenerateTest {
     @DisplayName("SOL 带回复上下文")
     void solWithReply() {
         LocalDateTime now = LocalDateTime.now();
-        // 当前消息是在回复"SOL能涨到300吗"
         TgRawMessage current = msg(3001, "sol_fan",
                 "我觉得这波能，生态项目数量一直在增加，基本面好",
                 "SOL 这次能涨到 300 吗？", now);

@@ -46,9 +46,9 @@ public class DanmakuProperties {
 
     @Data
     public static class Ai {
-        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+        private String baseUrl = "";
         private String apiKey = "";
-        private String model = "qwen-turbo";
+        private String model = "";
         private Double temperature = 0.4;
         private String responseFormat = "json_object";
     }

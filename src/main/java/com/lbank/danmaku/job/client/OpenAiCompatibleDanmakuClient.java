@@ -17,20 +17,20 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * 基于阿里云百炼（OpenAI 兼容模式）的 AI 弹幕客户端实现。
+ * 基于 OpenAI 兼容接口的 AI 弹幕客户端实现。
  *
  * 当 danmaku.ai.api-key 配置不为空时生效，自动替代 StubAiDanmakuClient。
  */
 @Component
 @ConditionalOnExpression("!'${danmaku.ai.api-key:}'.isEmpty()")
-public class QianwenAiDanmakuClient implements AiDanmakuClient {
-    private static final Logger log = LoggerFactory.getLogger(QianwenAiDanmakuClient.class);
+public class OpenAiCompatibleDanmakuClient implements AiDanmakuClient {
+    private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleDanmakuClient.class);
 
     private final DanmakuProperties properties;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
-    public QianwenAiDanmakuClient(
+    public OpenAiCompatibleDanmakuClient(
             DanmakuProperties properties,
             RestTemplate restTemplate,
             ObjectMapper objectMapper) {
@@ -56,7 +56,7 @@ public class QianwenAiDanmakuClient implements AiDanmakuClient {
                     url, new HttpEntity<>(body, headers), String.class);
             return parseResponse(rawResponse, request.getModel());
         } catch (Exception e) {
-            log.error("Qianwen API call failed, model={}", request.getModel(), e);
+            log.error("AI API call failed, model={}", request.getModel(), e);
             AiPromptResponse resp = new AiPromptResponse();
             resp.setModel(request.getModel());
             resp.setRawResponse(rawResponse);
@@ -76,7 +76,7 @@ public class QianwenAiDanmakuClient implements AiDanmakuClient {
         if (request.getTemperature() != null) {
             body.put("temperature", request.getTemperature());
         }
-        // 百炼支持 json_object 格式，强制 AI 输出合法 JSON
+        // json_object 格式强制 AI 输出合法 JSON
         if ("json_object".equals(request.getResponseFormat())) {
             body.put("response_format", Map.of("type", "json_object"));
         }
@@ -102,7 +102,7 @@ public class QianwenAiDanmakuClient implements AiDanmakuClient {
                 resp.setRequestId(requestId.asText());
             }
         } catch (Exception e) {
-            log.error("Failed to parse Qianwen response: {}", rawResponse, e);
+            log.error("Failed to parse AI response: {}", rawResponse, e);
             resp.setModel(requestModel);
         }
         return resp;
