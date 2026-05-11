@@ -1,0 +1,14 @@
+package com.lbank.danmaku.job;
+
+import org.mybatis.spring.annotation.MapperScan;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@MapperScan("com.example.danmaku.mapper")
+@SpringBootApplication
+public class DanmakuApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(DanmakuApplication.class, args);
+    }
+}
