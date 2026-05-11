@@ -85,13 +85,15 @@ public class AiDanmakuService {
                 - ad：是否广告或导流内容
                 - adReason：广告判断原因，ad=false 时留空
                 - sourceLanguage：原始消息的语言代码，如 zh、en、ru、tr
+                - marketType：市场类型，SPOT（现货）或 FUTURE（合约/永续/杠杆）；根据消息语义判断，区分不出时留空字符串
+                  判断依据举例：提到"做多/做空/爆仓/资金费率/永续/杠杆/合约"→ FUTURE；提到"买入/卖出/持仓/现货"且无合约语境 → SPOT
 
                 ## 六、输出要求
                 - 只输出合法 JSON 对象，不加 Markdown 代码块，不写任何解释
                 - 所有字段必须存在，缺失值用空字符串，布尔型用 false，数字型用 0
 
                 JSON 字段列表：
-                ad, adReason, displayable, symbol, eventType, sentiment, topic, confidence, sourceLanguage, content
+                ad, adReason, displayable, symbol, marketType, eventType, sentiment, topic, confidence, sourceLanguage, content
                 """;
     }
 

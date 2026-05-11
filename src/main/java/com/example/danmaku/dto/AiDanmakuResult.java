@@ -33,6 +33,8 @@ public class AiDanmakuResult {
     private String sourceLanguage;
     /** 最终弹幕正文，必须结合原文和上下文生成。 */
     private String content;
+    /** 市场类型：SPOT（现货）/ FUTURE（合约）；无法判断时为空。 */
+    private String marketType;
     /** AI 模型名称，便于日志排查。 */
     private String modelName;
 }

@@ -23,6 +23,8 @@ public class DanmakuSendRequest {
     private String topic;
     /** AI 分析置信度。 */
     private Integer confidence;
+    /** 市场类型：SPOT / FUTURE；无法判断时为空。 */
+    private String marketType;
     /** 文案生成风格，例如 human_rewrite。 */
     private String contentStyle;
     /** 模板或生成策略 ID，便于回溯。 */

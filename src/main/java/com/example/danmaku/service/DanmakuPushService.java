@@ -40,6 +40,7 @@ public class DanmakuPushService {
         request.setSentiment(aiResult.getSentiment());
         request.setTopic(aiResult.getTopic());
         request.setConfidence(aiResult.getConfidence());
+        request.setMarketType(aiResult.getMarketType());
         request.setContentStyle("human_rewrite");
         request.setTemplateId("ai_direct");
 
