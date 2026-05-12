@@ -191,7 +191,7 @@ class AiDanmakuGenerateTest {
     }
 
     @Test
-    @DisplayName("BTC 宏观新闻")
+    @DisplayName("宏观新闻：美联储暂停加息")
     void btcMacroNews() {
         TgRawMessage current = msg(7001, "news_reader",
                 "美联储今晚宣布暂停加息，BTC短线反应还不错", null, null);
@@ -200,9 +200,10 @@ class AiDanmakuGenerateTest {
                         null, LocalDateTime.now().minusMinutes(5))
         );
         AiDanmakuResult result = aiService.generate(current, ctx);
-        print("BTC 宏观新闻", result);
+        print("宏观新闻：美联储暂停加息", result);
         assert result.isDisplayable() : "预期 displayable=true";
-        assert "BTCUSDT".equals(result.getMatchedEvent()) : "预期 matchedEvent=BTCUSDT, 实际: " + result.getMatchedEvent();
+        // 消息主体是美联储加息决策，BTC 只是被顺带提到的反应，匹配宏观事件更准确
+        assert "美联储加息".equals(result.getMatchedEvent()) : "预期 matchedEvent=美联储加息, 实际: " + result.getMatchedEvent();
     }
 
     @Test
