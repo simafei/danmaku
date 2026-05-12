@@ -91,6 +91,7 @@ class AiDanmakuGenerateTest {
         System.out.println("\n========== " + caseName + " ==========");
         System.out.println("  displayable   : " + r.isDisplayable());
         System.out.println("  matchedEvent  : " + r.getMatchedEvent());
+        System.out.println("  marketType    : " + r.getMarketType());
         System.out.println("  confidence    : " + r.getConfidence());
         System.out.println("  ad            : " + r.isAd()
                 + (r.getAdReason() != null && !r.getAdReason().isBlank()
@@ -132,6 +133,7 @@ class AiDanmakuGenerateTest {
         print("ETH 合约做多爆仓讨论", result);
         assert result.isDisplayable() : "预期 displayable=true";
         assert "ETHUSDT".equals(result.getMatchedEvent()) : "预期 matchedEvent=ETHUSDT, 实际: " + result.getMatchedEvent();
+        assert "FUTURE".equals(result.getMarketType()) : "预期 marketType=FUTURE, 实际: " + result.getMarketType();
     }
 
     @Test

@@ -36,6 +36,7 @@ public class DanmakuPushService {
         request.setLanguage(rawMessage.getLanguage());
         request.setContent(content);
         request.setConfidence(aiResult.getConfidence());
+        request.setMarketType(aiResult.getMarketType());
 
         DanmakuSendResult result = senderClient.send(request);
 

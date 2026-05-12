@@ -17,4 +17,6 @@ public class DanmakuSendRequest {
     private String content;
     /** AI 匹配置信度，0–100。 */
     private Integer confidence;
+    /** 市场类型：SPOT / FUTURE；非加密货币或无法判断时为空。 */
+    private String marketType;
 }

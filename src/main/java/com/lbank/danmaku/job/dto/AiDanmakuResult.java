@@ -27,6 +27,8 @@ public class AiDanmakuResult {
     private Integer confidence;
     /** 源语言代码，如 zh / en / ru。 */
     private String sourceLanguage;
+    /** 市场类型：SPOT（现货）/ FUTURE（合约/永续/杠杆）；非加密货币讨论或无法判断时为空。 */
+    private String marketType;
     /** AI 模型名称，便于日志排查。 */
     private String modelName;
 }
