@@ -108,3 +108,23 @@ create table if not exists danmaku_push_log (
   key idx_decision (decision_id),
   key idx_matched_event_created (matched_event, create_time)
 ) engine=InnoDB default charset=utf8mb4 comment='弹幕推送日志表，仅 PUSH 决策时写入，记录推送内容和接口响应';
+
+
+-- ----------------------------
+-- 5. danmaku_template：弹幕模板库
+-- ----------------------------
+create table if not exists danmaku_template (
+  id             bigint        not null auto_increment  comment '自增主键',
+  matched_event  varchar(128)  not null                 comment '适用的事件或交易对，如 BTCUSDT、美伊战争',
+  language       varchar(16)   not null default 'zh'   comment '语言代码，如 zh、en',
+  content        varchar(200)  not null                 comment '弹幕文案',
+  sentiment      varchar(16)                            comment '情绪倾向：bullish / bearish / neutral',
+  event_type     varchar(32)                            comment '事件类型：price / news / opinion / question / other',
+  market_type    varchar(16)                            comment '市场类型：SPOT / FUTURE / 空（非加密货币时为空）',
+  used_count     int           not null default 0       comment '被推荐次数，用于后续热度统计',
+  create_time    datetime      not null default current_timestamp                          comment '创建时间',
+  update_time    datetime      not null default current_timestamp on update current_timestamp comment '最后更新时间',
+  primary key (id),
+  unique key uk_event_lang_content (matched_event, language, content(100)),
+  key idx_event_lang (matched_event, language)
+) engine=InnoDB default charset=utf8mb4 comment='弹幕模板库，由 AI 批量预生成，用于向用户推荐弹幕选项';
