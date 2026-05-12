@@ -6,13 +6,16 @@
 
 ## 1. 背景与目标
 
-将平台自有 Telegram 官方群的实时讨论，转化为 K 线页面的情绪弹幕。
+将平台 Telegram 群的实时讨论，作为弹幕推送到对应页面（K 线页、赛事页等）。
 
-- 输入：自有 TG 官方群的文本消息
-- 处理：AI 判断价值，生成口语化弹幕
-- 输出：调用外部弹幕接口，推送到对应币对页面
+- **输入**：自有 TG 官方群的文本消息
+- **处理**：AI 过滤噪声，匹配当前活跃事件，识别话题
+- **输出**：以原始消息文本为内容，调用外部弹幕接口推送到对应事件页面
 
-**核心原则：** 每条消息独立判断，只有有明确币对且内容有价值的消息才推送。弹幕文案使用原始群语言，不做翻译。
+**核心原则：**
+- 弹幕内容 = 原始消息文本，不做 AI 改写
+- 事件列表由业务方动态提供，不限加密货币，可以是世界杯、宏观事件等任何话题
+- 每条消息独立判断，只有通过过滤、成功匹配到事件且原文字数不超限才推送
 
 ---
 
@@ -21,15 +24,17 @@
 ```
 TG 群 → Long Polling Bot → TelegramMessageCollector → tg_raw_message (PENDING)
                                                                ↓
-                                                    TelegramMessageWorker (定时扫描)
+                                                    TelegramMessageWorker（XXL-JOB 驱动）
                                                                ↓
-                                                    ContextMessageService (加载上下文)
+                                                    ContextMessageService（加载上下文）
                                                                ↓
-                                                    AiDanmakuService (AI 生成弹幕)
+                                          EventProvider.getActiveEvents()（获取事件列表）
                                                                ↓
-                                                    PushDecisionService (推送判定)
+                                                    AiDanmakuService（过滤 + 事件匹配）
                                                                ↓
-                                                    DanmakuPushService (推送 + 记录日志)
+                                                    PushDecisionService（推送判定）
+                                                               ↓
+                                                    DanmakuPushService（推送原文 + 记录日志）
 ```
 
 ---
@@ -64,11 +69,11 @@ TG 群 → Long Polling Bot → TelegramMessageCollector → tg_raw_message (PEN
 
 ### 3.4 转发消息处理
 
-使用 Bot API 7.0 引入的 `forward_origin` 字段（对应 SDK 的 `message.getForwardOrigin()`），覆盖四种转发来源：
+使用 Bot API 7.0 的 `forward_origin` 字段（`message.getForwardOrigin()`），覆盖四种转发来源：
 
 | 类型 | 存储字段 |
 |------|---------|
-| `MessageOriginUser`（来自普通用户）| `forward_from_id`、`forward_from_username` |
+| `MessageOriginUser`（来自普通用户）| `forward_from_id` |
 | `MessageOriginHiddenUser`（隐藏资料用户）| `forward_from_username` |
 | `MessageOriginChat`（来自群组）| `forward_from_chat_id` |
 | `MessageOriginChannel`（来自频道）| `forward_from_chat_id` |
@@ -79,13 +84,14 @@ TG 群 → Long Polling Bot → TelegramMessageCollector → tg_raw_message (PEN
 - 辅助唯一键：`uk_tg_raw_update_id (update_id)`（`NOT NULL`）
 - Long Polling 重启后可能拿到重复 update，`saveRawMessage()` 捕获 `DuplicateKeyException` 静默忽略
 
-### 3.6 时间处理
+### 3.6 管理员缓存同步
 
-所有时间字段（`sent_at`、`forward_date`）统一使用 `Asia/Shanghai` 时区，与 `application.yml` 中 MySQL `serverTimezone=Asia/Shanghai` 保持一致。
+`AdminSyncService` 通过 Telegram `getChatAdministrators` API 拉取管理员列表，写入 Redis：
 
-### 3.7 管理员缓存
-
-`AdminCacheService` 从 Redis 读取 `tg:admin:{groupId}:{userId}`，值为 `1` 则认为是管理员。**当前无写入逻辑，需要外部系统或手动写入 Redis。**
+- Key：`tg:admin:{groupId}:{userId}`，值 `"1"`，TTL 2 小时
+- 启动时自动同步（`@EventListener(ApplicationReadyEvent.class)`）
+- 支持 XXL-JOB 定时刷新（JobHandler：`adminSyncJobHandler`）
+- 支持 `POST /admin/groups/{groupId}/admins/sync` 手动触发
 
 ---
 
@@ -93,22 +99,22 @@ TG 群 → Long Polling Bot → TelegramMessageCollector → tg_raw_message (PEN
 
 ### 4.1 触发机制
 
-`TelegramMessageWorker.tick()` 由 Spring `@Scheduled` 驱动，`fixedDelay = 3000ms`（上一次执行完成后等 3 秒再启动下一次）。
+`TelegramMessageWorker.tick()` 由 **XXL-JOB** 驱动（JobHandler：`danmakuWorkerJobHandler`），在 XXL-JOB Admin 配置调度频率。不再使用 Spring `@Scheduled`。
 
 ### 4.2 处理流程
 
 ```
-recoverTimedOut()          // 超时消息回收
+recoverTimedOut()               // 超时消息回收
     ↓
-selectList(PENDING, limit 50)  // 批量查询
+selectList(PENDING, limit 50)   // 批量查询
     ↓
-claim(id)                  // 乐观抢占：UPDATE WHERE status=PENDING → PROCESSING
+claim(id)                       // 乐观抢占：UPDATE WHERE status=PENDING → PROCESSING
     ↓
 process(id)
-    ├─ loadNearbyContext()  // 同群 10 分钟内近 20 条消息
+    ├─ loadNearbyContext()       // 同群 10 分钟内近 20 条消息
     ├─ aiDanmakuService.generate()
     ├─ decisionService.decide()
-    └─ pushService.push()  // 仅 PUSH 决策时调用
+    └─ pushService.push()        // 仅 PUSH 决策时调用
     ↓
 markDone() 或 markRetryOrFailed()
 ```
@@ -134,55 +140,101 @@ PENDING → PROCESSING → DONE
 | 处理超时 | 5 分钟 | `danmaku.worker.processing-timeout-minutes` |
 | 批次大小 | 50 | `danmaku.worker.batch-size` |
 
-**超时恢复**：`recoverTimedOut()` 每次 tick 开始时执行，将 `PROCESSING` 且 `processing_started_at <= now-5min` 的消息重置。超时同样计入 `retry_count`，超过上限后标记为 `FAILED`，避免无限超时循环。
-
-失败原因写入 `last_error` 字段，格式为 `e.toString()`（保证非 null），同时记录 error 级别日志。
+**超时恢复**：`recoverTimedOut()` 每次 tick 开始时执行，将 `PROCESSING` 且 `processing_started_at <= now-5min` 的消息重置。超时同样计入 `retry_count`，超过上限后标记为 `FAILED`。
 
 ---
 
 ## 5. AI 服务层
 
-### 5.1 接口设计
+### 5.1 职责
 
-`AiDanmakuClient` 是 OpenAI 兼容接口，只传递 `model`、`systemPrompt`、`userPrompt`、`temperature`、`responseFormat`，不绑定业务对象。
+AI **不生成弹幕文案**，只做两件事：
 
-**当前无真实实现**，`StubAiDanmakuClient`（`@ConditionalOnMissingBean`）兜底返回 `hold`，不会误推送。接真实 AI 时实现 `AiDanmakuClient` Bean 即可，Stub 自动失效。
+1. **过滤**：识别广告、推广、无意义噪声（纯表情/寒暄），标记 `displayable=false`
+2. **事件匹配**：从 `EventProvider` 提供的事件列表中选出与消息最相关的一项，输出为 `matchedEvent`
 
-### 5.2 Prompt 构造
+弹幕内容直接使用原始消息文本（`normalizedText`），不经过 AI 改写。
 
-**System Prompt** 固定，包含：过滤规则（广告、水聊、非文字）、币对识别规则、语言规则（弹幕必须使用原始群语言）、输出格式要求。
+### 5.2 EventProvider 接口
 
-**User Prompt** 包含：
-- 弹幕语言（来自 `tg_group_config.language`）
-- 当前消息（messageId、language、username、normalizedText）
-- 上下文消息列表（同群 10 分钟内最近 20 条，按时间由近到远）
-
-### 5.3 AI 输出字段
-
-```json
-{
-  "decision": "push | discard | hold",
-  "decisionReason": "简短原因",
-  "ad": false,
-  "adReason": "",
-  "displayable": true,
-  "symbol": "BTCUSDT",
-  "eventType": "price | news | opinion | question | other",
-  "sentiment": "bullish | bearish | neutral",
-  "topic": "话题关键词，4-12字",
-  "confidence": 82,
-  "sourceLanguage": "zh",
-  "content": "最终弹幕文案"
+```java
+public interface EventProvider {
+    List<String> getActiveEvents();
 }
 ```
 
-### 5.4 异常兜底
+- 事件列表可以是任何话题，不限加密货币：`["BTCUSDT", "美伊战争", "2026年世界杯", ...]`
+- 实现类负责从数据库、配置中心或外部 API 获取当前活跃事件
+- 默认 `StubEventProvider` 返回空列表，业务方实现 Bean 后自动替换（`@ConditionalOnMissingBean`）
+
+### 5.3 AI 客户端接口
+
+`AiDanmakuClient` 对接 OpenAI 兼容接口，只传 `model`、`systemPrompt`、`userPrompt`、`temperature`、`responseFormat`。
+
+内置实现 `OpenAiCompatibleDanmakuClient`：
+
+- 条件：`danmaku.ai.api-key` 不为空时生效（`@ConditionalOnExpression`）
+- 调用 `{baseUrl}/chat/completions`，Bearer Auth
+- 兜底：`StubAiDanmakuClient`（`@ConditionalOnMissingBean`），返回 `displayable=false`，不会误推送
+
+### 5.4 Prompt 构造
+
+**System Prompt** 固定，包含：过滤规则、matchedEvent 选取规则（必须原文选取不得拼造）、marketType 判断规则、输出格式。
+
+**User Prompt** 动态生成，包含三部分：
+
+```
+【事件列表】
+- BTCUSDT
+- 美伊战争
+- 2026年世界杯
+...
+
+【当前消息】
+user=xxx, text=美伊局势紧张BTC跌了5%
+  ↳ 回复的消息：（如有）
+
+【近期上下文，按时间从近到远】
+- [2分钟前] user=yyy, text=...
+- [5分钟前] user=zzz, text=...
+```
+
+### 5.5 AI 输出字段
+
+```json
+{
+  "ad": false,
+  "adReason": "",
+  "displayable": true,
+  "matchedEvent": "美伊战争",
+  "topic": "美伊局势引发BTC暴跌",
+  "marketType": "SPOT",
+  "confidence": 85,
+  "sourceLanguage": "zh"
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `displayable` | 是否通过过滤（false = 广告或无意义噪声） |
+| `ad` / `adReason` | 是否广告及原因 |
+| `matchedEvent` | 从事件列表原文选取的匹配项；无匹配时为空 |
+| `topic` | AI 提炼的具体话题，6–20 字，如"美伊局势引发BTC暴跌" |
+| `marketType` | `SPOT` / `FUTURE` / 空；仅加密货币交易语境下填写 |
+| `confidence` | 对 matchedEvent 选择的把握程度，0–100 |
+| `sourceLanguage` | 消息语言代码 |
+
+**`matchedEvent` 与 `topic` 的关系：**
+- `matchedEvent` 是结构化标识，用于路由到哪个事件页面（来自事件列表）
+- `topic` 是内容描述，告诉用户正在讨论什么（AI 自由生成）
+- 例：`matchedEvent=美伊战争`，`topic=美伊局势引发BTC暴跌`
+
+### 5.6 异常兜底
 
 | 情况 | 处理 |
 |------|------|
 | AI 无响应或空响应 | 返回 `hold(empty_ai_response)` |
 | JSON 解析失败 | 返回 `hold(invalid_ai_json)` |
-| `content` 字段为空 | 强制改为 `hold(empty_content)`，不以原始文本兜底推送 |
 | `sourceLanguage` 为空 | 填充 `rawMessage.language` |
 | `modelName` 为空 | 填充 AI 响应中的 model 名 |
 
@@ -196,8 +248,8 @@ PENDING → PROCESSING → DONE
 
 ```
 1. rejectReason()     → DISCARD（规则直接拒绝）
-2. Redis dedup        → HOLD（近似重复内容）
-3. Redis rate limit   → HOLD（单币对限频）
+2. Redis dedup        → HOLD（相同事件下相同文本，短时间内重复）
+3. Redis rate limit   → HOLD（同事件限频）
 4.                    → PUSH
 ```
 
@@ -205,29 +257,30 @@ PENDING → PROCESSING → DONE
 
 | 原因 | 触发条件 |
 |------|---------|
-| `admin_message` | `rawMessage.senderIsAdmin = true`（当前恒为 false，保留为手动测试入口） |
+| `admin_message` | `rawMessage.senderIsAdmin = true` |
 | `non_text_message` | `rawMessage.hasMedia = true` |
 | `ad:{reason}` | `aiResult.isAd() = true` |
-| `not_displayable` | `aiResult.isDisplayable() = false` |
-| `no_symbol` | `aiResult.symbol` 为空 |
+| `not_displayable` | `aiResult.isDisplayable() = false`（广告或无意义噪声） |
+| `no_matched_event` | `aiResult.matchedEvent` 为空（未匹配任何事件） |
 | `low_confidence` | `aiResult.confidence < minConfidence`（默认 50） |
+| `content_too_long` | 原始消息字数 > `maxContentLength`（默认 30） |
 
 ### 6.3 去重（Redis）
 
-- Key：`tg:dedupe:` + SHA-256(`symbol:content`)
+- Key：`tg:dedupe:` + SHA-256(`matchedEvent:normalizedText`)
 - TTL：60 秒（`danmaku.decision.duplicate-ttl-seconds`）
 - 使用 `setIfAbsent`（原子操作），命中则 `HOLD(duplicate_similar_content)`
 
 ### 6.4 限频（Redis）
 
-- Key：`tg:rate:symbol:{symbol}`
+- Key：`tg:rate:event:{matchedEvent}`
 - TTL：15 秒（`danmaku.decision.symbol-rate-limit-seconds`）
-- 命中则 `HOLD(symbol_rate_limited)`
+- 命中则 `HOLD(event_rate_limited)`
 - 仅在通过去重后才检查限频
 
 ### 6.5 判定日志
 
-每条消息无论结果如何都写入 `tg_push_decision_log`，记录：decision、decisionReason、dedupeKey、rateLimited、finalContent、symbol 等，用于排查和规则迭代。
+每条消息无论结果如何都写入 `tg_push_decision_log`，记录 decision、decisionReason、dedupeKey、rateLimited、symbol（存 matchedEvent）、topic 等，用于排查和规则迭代。
 
 ---
 
@@ -235,26 +288,29 @@ PENDING → PROCESSING → DONE
 
 `DanmakuPushService.push()` 仅在 `PushDecisionService` 返回 `PUSH` 时调用。
 
-### 7.1 推送接口
+### 7.1 推送内容
 
-`DanmakuSenderClient` 同样是外部接口，`StubDanmakuSenderClient` 为空实现兜底。推送请求字段：
+**弹幕正文直接使用原始消息的 `normalizedText`**，不经过 AI 改写。
+
+推送请求字段：
 
 ```json
 {
   "rawMessageId": 123,
-  "symbol": "BTCUSDT",
+  "matchedEvent": "美伊战争",
   "language": "zh",
-  "content": "看多的人开始变多了",
-  "eventType": "opinion",
-  "sentiment": "bullish",
-  "topic": "BTC突破讨论",
-  "confidence": 82,
-  "contentStyle": "human_rewrite",
-  "templateId": "ai_direct"
+  "content": "美伊局势这么紧张BTC真跌了",
+  "topic": "美伊局势引发BTC暴跌",
+  "marketType": "SPOT",
+  "confidence": 85
 }
 ```
 
-### 7.2 推送日志
+### 7.2 推送接口
+
+`DanmakuSenderClient` 是外部接口，`StubDanmakuSenderClient` 为空实现兜底。
+
+### 7.3 推送日志
 
 推送结果（成功/失败、responseBody、requestId）写入 `danmaku_push_log`，关联 `raw_message_id` 和 `decision_id`。
 
@@ -269,22 +325,22 @@ PENDING → PROCESSING → DONE
 | 字段 | 说明 |
 |------|------|
 | `group_id` | TG 群 ID，负整数（如 `-1001234567890`） |
-| `language` | 群主要语言，如 `zh`、`en`，影响弹幕语言标记 |
+| `language` | 群主要语言，如 `zh`、`en` |
 | `enabled` | 是否采集该群消息 |
-| `push_enabled` | 是否允许该群内容推送到弹幕（当前由 AI 和判定层控制，此字段预留） |
-| `allowed_symbols_json` | 该群重点覆盖的币种，预留字段 |
+| `push_enabled` | 是否允许推送弹幕（预留） |
 
 ### 8.2 管理接口
 
-`GroupConfigController` 提供三个接口：
+`GroupConfigController` 提供以下接口：
 
 ```
-GET    /admin/groups                         # 查询所有群配置
-POST   /admin/groups                         # 新增群配置
-PATCH  /admin/groups/{groupId}/enabled       # 启用或禁用某个群
+GET    /admin/groups                          # 查询所有群配置
+POST   /admin/groups                          # 新增群配置（同时自动同步管理员缓存）
+PATCH  /admin/groups/{groupId}/enabled        # 启用或禁用某个群
+POST   /admin/groups/{groupId}/admins/sync    # 手动刷新管理员缓存
 ```
 
-POST 请求体：
+POST 新增群请求体：
 
 ```json
 {
@@ -296,11 +352,11 @@ POST 请求体：
 }
 ```
 
-重复注册同一 `groupId` 返回 `409 Conflict`，不覆盖已有配置。
+重复注册同一 `groupId` 返回 `409 Conflict`。
 
 ### 8.3 获取群 ID
 
-Bot 加入群后，调用以下接口获取 `chat.id`（Long Polling 拉到的消息中也可以直接看到）：
+Bot 加入群后，调用以下接口获取 `chat.id`：
 
 ```bash
 curl "https://api.telegram.org/bot<BOT_TOKEN>/getUpdates"
@@ -334,29 +390,30 @@ curl "https://api.telegram.org/bot<BOT_TOKEN>/getUpdates"
 | processing_started_at | datetime | 抢占时间，用于超时判断 |
 | last_error | text | 最近一次错误信息 |
 | normalized_text | text | trim + 合并空白后的文本 |
-| entities_json | json | Telegram 消息实体（链接、mention 等） |
-| has_link | tinyint(1) | 是否含 url/text_link 类型实体 |
+| has_link | tinyint(1) | 是否含链接类型实体 |
 
 ### 9.3 `tg_push_decision_log` — 推送判定日志表
 
-每条消息处理后必写，无论推送还是丢弃，用于排查和规则迭代。
+每条消息处理后必写，无论推送还是丢弃。
 
-关键字段：`decision`、`decision_reason`、`dedupe_key`、`rate_limited`、`final_content`、`symbol`、`confidence`。
+关键字段：`decision`、`decision_reason`、`dedupe_key`、`rate_limited`、`symbol`（存 matchedEvent）、`topic`。
 
 ### 9.4 `danmaku_push_log` — 弹幕推送日志表
 
-仅 PUSH 决策时写入，记录推送内容、状态、接口响应。
+仅 PUSH 决策时写入，记录推送内容（原始消息文本）、状态、接口响应。
 
 ---
 
 ## 10. 配置说明
 
-### 10.1 必须配置
+### 10.1 环境变量
 
-```bash
-# Bot Token，polling 开启时必填
-TELEGRAM_BOT_TOKEN=xxxx
-```
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `TELEGRAM_BOT_TOKEN` | polling 实例必填 | Bot Token |
+| `AI_API_KEY` | 推荐 | 不配置则使用 Stub，不会推送 |
+| `AI_BASE_URL` | 与 API_KEY 配套 | OpenAI 兼容接口地址 |
+| `AI_MODEL` | 与 API_KEY 配套 | 模型名，如 `qwen-turbo`、`gpt-4o-mini` |
 
 ### 10.2 完整配置项
 
@@ -368,19 +425,39 @@ danmaku:
       enabled: true          # false 则该实例不启动 polling
   worker:
     enabled: true            # false 则该实例不处理消息
-    fixed-delay-ms: 3000     # Worker 扫描间隔（ms）
     batch-size: 50           # 每次处理消息数
     max-retry: 3             # 最大重试次数（含超时恢复）
     processing-timeout-minutes: 5  # 超时恢复阈值
   decision:
     min-confidence: 50           # AI 置信度下限
-    symbol-rate-limit-seconds: 15 # 同币对限频窗口
-    duplicate-ttl-seconds: 60    # 去重 TTL
+    symbol-rate-limit-seconds: 15 # 同事件限频窗口（秒）
+    duplicate-ttl-seconds: 60    # 去重 TTL（秒）
+    max-content-length: 30       # 原始消息字数上限，超过不推送
   ai:
-    model: gpt-4o-mini           # 传给 AiDanmakuClient 的模型名，由具体实现解析
+    base-url: ${AI_BASE_URL:}
+    api-key: ${AI_API_KEY:}
+    model: ${AI_MODEL:}
     temperature: 0.4
     response-format: json_object
+
+xxl:
+  job:
+    admin:
+      addresses: ${XXL_JOB_ADMIN_ADDRESSES:http://localhost:8090/xxl-job-admin}
+    accessToken: ${XXL_JOB_ACCESS_TOKEN:default_token}
+    executor:
+      appname: danmaku-executor
+      port: ${XXL_JOB_EXECUTOR_PORT:9999}
+      logpath: ${XXL_JOB_LOG_PATH:/data/applogs/xxl-job}
+      logretentiondays: 30
 ```
+
+### 10.3 XXL-JOB 任务配置
+
+| JobHandler | 说明 | 建议调度 |
+|------------|------|---------|
+| `danmakuWorkerJobHandler` | 消息处理主循环 | 固定间隔 3s |
+| `adminSyncJobHandler` | 管理员缓存刷新 | 每 1 小时 |
 
 ---
 
@@ -393,7 +470,7 @@ danmaku:
 | Collector | true | true | **必须且只能 1 台** |
 | Worker | false | true | 可横向扩展 |
 
-**Polling 不能多实例**：Telegram Long Polling 的 offset 在 SDK 内存中维护，多实例并发 poll 同一 token 会导致 update 被随机分发到不同实例，虽然 DB 唯一键可防止重复入库，但行为不可控。
+**Polling 不能多实例**：Telegram Long Polling 的 offset 在 SDK 内存中维护，多实例并发 poll 同一 token 会导致 update 被随机分发到不同实例。
 
 **Worker 天然多实例安全**：`claim()` 用 `UPDATE WHERE status=PENDING` 实现乐观抢占，Redis 用于跨实例共享去重和限频状态。
 
@@ -405,6 +482,9 @@ services:
     image: danmaku:latest
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - AI_API_KEY=${AI_API_KEY}
+      - AI_BASE_URL=${AI_BASE_URL}
+      - AI_MODEL=${AI_MODEL}
       - DANMAKU_TELEGRAM_POLLING_ENABLED=true
       - DANMAKU_WORKER_ENABLED=true
     deploy:
@@ -413,6 +493,9 @@ services:
   worker:
     image: danmaku:latest
     environment:
+      - AI_API_KEY=${AI_API_KEY}
+      - AI_BASE_URL=${AI_BASE_URL}
+      - AI_MODEL=${AI_MODEL}
       - DANMAKU_TELEGRAM_POLLING_ENABLED=false
       - DANMAKU_WORKER_ENABLED=true
     deploy:
@@ -423,30 +506,36 @@ services:
 
 ## 12. 外部依赖接入
 
-当前两个外部接口均有 Stub 实现，服务可独立启动和测试。正式接入时实现对应 Bean 即可：
+当前所有外部接口均有 Stub 实现，服务可独立启动和测试。正式接入时实现对应 Bean 即可。
 
-### 12.1 `AiDanmakuClient`
+### 12.1 `EventProvider` — 事件列表
 
 ```java
-@Component
-public class RealAiDanmakuClient implements AiDanmakuClient {
+@Service
+public class RealEventProvider implements EventProvider {
     @Override
-    public AiPromptResponse complete(AiPromptRequest request) {
-        // 调用 OpenAI / Gemini / 其他兼容接口
+    public List<String> getActiveEvents() {
+        // 从数据库、配置中心或外部 API 获取当前活跃事件列表
+        // 例如：["BTCUSDT", "ETHUSDT", "美伊战争", "2026年世界杯"]
     }
 }
 ```
 
-注意：`request.getModel()` 由配置项 `danmaku.ai.model` 传入，实现类按需解析。
+### 12.2 `AiDanmakuClient` — AI 接口
 
-### 12.2 `DanmakuSenderClient`
+内置 `OpenAiCompatibleDanmakuClient`，配置 `AI_API_KEY` 后自动激活，支持所有 OpenAI 兼容接口（阿里百炼、Azure OpenAI 等）。
+
+需要切换模型时修改环境变量 `AI_MODEL` 即可，无需改代码。
+
+### 12.3 `DanmakuSenderClient` — 弹幕推送接口
 
 ```java
-@Component
+@Service
 public class RealDanmakuSenderClient implements DanmakuSenderClient {
     @Override
     public DanmakuSendResult send(DanmakuSendRequest request) {
         // 调用现有弹幕推送接口
+        // request 包含：matchedEvent、content（原始消息文本）、topic、marketType 等
     }
 }
 ```
@@ -459,8 +548,9 @@ public class RealDanmakuSenderClient implements DanmakuSenderClient {
 |------|---------|
 | Bot 只收到命令消息，收不到普通聊天 | 检查 BotFather 是否关闭了 Privacy Mode |
 | 某个群消息没有入库 | 查 `tg_group_config` 该群是否存在且 `enabled=1` |
-| 消息入库但没有推送判定日志 | 查 `tg_raw_message.ingest_status`，确认 worker 是否启用 |
-| 有判定日志但 decision 都是 HOLD/DISCARD | 查 `decision_reason` 字段，对照判定规则逐一排查 |
+| 消息入库但没有推送判定日志 | 查 `tg_raw_message.ingest_status`，确认 worker 是否启用，XXL-JOB 任务是否运行 |
+| 有判定日志但 decision 都是 DISCARD | 查 `decision_reason`：`no_matched_event` 说明事件列表为空或无匹配；`content_too_long` 说明消息超过字数限制 |
+| 有判定日志但 decision 都是 HOLD | 查 `decision_reason`：`duplicate_similar_content` 或 `event_rate_limited`，属正常限流行为 |
 | `last_error` 为 `processing_timeout` | AI 接口响应超过 5 分钟，检查 AI 服务可用性或调大 `processing-timeout-minutes` |
-| 推送弹幕内容是 `hold` | `AiDanmakuClient` 未接真实实现，Stub 返回 hold |
-| 转发消息 `forward_date` 为 null | 该消息非转发消息（`getForwardOrigin() == null`），属正常情况 |
+| 推送弹幕但 `matchedEvent` 都为空 | `EventProvider` 未实现真实数据源，Stub 返回空列表，所有消息会被 `no_matched_event` 拒绝 |
+| 转发消息 `forward_date` 为 null | 该消息非转发消息，属正常情况 |
