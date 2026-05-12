@@ -77,10 +77,10 @@ public class PushDecisionService {
         TgPushDecisionLog log = new TgPushDecisionLog();
         log.setRawMessageId(rawMessage.getId());
         log.setLanguage(rawMessage.getLanguage());
-        log.setSymbol(aiResult.getMatchedEvent());
+        log.setMatchedEvent(aiResult.getMatchedEvent());
         log.setTopic(aiResult.getTopic());
         log.setRateLimited(false);
-        log.setCreatedAt(LocalDateTime.now());
+        log.setCreateTime(LocalDateTime.now());
         return log;
     }
 

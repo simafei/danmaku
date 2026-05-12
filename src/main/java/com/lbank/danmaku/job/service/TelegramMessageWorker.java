@@ -71,7 +71,7 @@ public class TelegramMessageWorker {
                 .eq(TgRawMessage::getIngestStatus, IngestStatus.PENDING)
                 .set(TgRawMessage::getIngestStatus, IngestStatus.PROCESSING)
                 .set(TgRawMessage::getProcessingStartedAt, LocalDateTime.now())
-                .set(TgRawMessage::getUpdatedAt, LocalDateTime.now()));
+                .set(TgRawMessage::getUpdateTime, LocalDateTime.now()));
         return updated == 1;
     }
 
@@ -97,7 +97,7 @@ public class TelegramMessageWorker {
         rawMessageMapper.update(null, new LambdaUpdateWrapper<TgRawMessage>()
                 .eq(TgRawMessage::getId, id)
                 .set(TgRawMessage::getIngestStatus, IngestStatus.DONE)
-                .set(TgRawMessage::getUpdatedAt, LocalDateTime.now()));
+                .set(TgRawMessage::getUpdateTime, LocalDateTime.now()));
     }
 
     private void markRetryOrFailed(TgRawMessage rawMessage, Exception e) {
@@ -109,7 +109,7 @@ public class TelegramMessageWorker {
                 .set(TgRawMessage::getRetryCount, retryCount + 1)
                 .set(TgRawMessage::getNextRetryAt, failed ? null : LocalDateTime.now().plusSeconds(30))
                 .set(TgRawMessage::getLastError, e.toString())
-                .set(TgRawMessage::getUpdatedAt, LocalDateTime.now()));
+                .set(TgRawMessage::getUpdateTime, LocalDateTime.now()));
     }
 
     private void recoverTimedOut() {
@@ -130,7 +130,7 @@ public class TelegramMessageWorker {
                     .set(TgRawMessage::getRetryCount, retryCount + 1)
                     .set(TgRawMessage::getNextRetryAt, failed ? null : LocalDateTime.now().plusSeconds(30))
                     .set(TgRawMessage::getLastError, "processing_timeout")
-                    .set(TgRawMessage::getUpdatedAt, LocalDateTime.now()));
+                    .set(TgRawMessage::getUpdateTime, LocalDateTime.now()));
         }
     }
 }

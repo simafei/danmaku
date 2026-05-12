@@ -4,39 +4,34 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.LocalDateTime;
 import lombok.Data;
 
-@Data
-@TableName("tg_push_decision_log")
 /**
  * 推送判定日志表。
  *
- * 记录每条消息为什么推送、丢弃或暂存，方便产品验收和排障。
+ * 每条消息处理后必写，无论推送还是丢弃，用于排查和规则迭代。
  */
+@Data
+@TableName("tg_push_decision_log")
 public class TgPushDecisionLog {
     /** 自增主键。 */
     private Long id;
-    /** 原始消息 ID。 */
+    /** 关联的原始消息 ID。 */
     private Long rawMessageId;
-    /** 源语言。 */
+    /** 消息源语言代码。 */
     private String language;
-    /** 判定归属的交易对。 */
-    private String symbol;
-    /** 事件类型。 */
-    private String eventType;
-    /** 情绪倾向。 */
-    private String sentiment;
-    /** 分享使用的话题关键词。 */
+    /** AI 从事件列表中匹配到的事件或交易对，无匹配时为空。 */
+    private String matchedEvent;
+    /** AI 提炼的具体话题描述。 */
     private String topic;
-    /** 最终判定：push、discard、hold。 */
+    /** 判定结果：PUSH / DISCARD / HOLD。 */
     private String decision;
     /** 判定原因。 */
     private String decisionReason;
-    /** Redis 去重 key。 */
+    /** Redis 去重 key，PUSH 路径才有值。 */
     private String dedupeKey;
-    /** 是否命中单币对限频。 */
+    /** 是否命中事件限频。 */
     private Boolean rateLimited;
-    /** 最终弹幕文案快照，可为空。 */
-    private String finalContent;
-    /** 创建时间。 */
-    private LocalDateTime createdAt;
-
+    /** 判定时间。 */
+    private LocalDateTime createTime;
+    /** 最后更新时间。 */
+    private LocalDateTime updateTime;
 }

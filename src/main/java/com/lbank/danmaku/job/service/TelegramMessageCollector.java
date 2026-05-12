@@ -116,8 +116,8 @@ public class TelegramMessageCollector {
         raw.setHasMedia(false);
         raw.setIngestStatus(IngestStatus.PENDING);
         raw.setRetryCount(0);
-        raw.setCreatedAt(now);
-        raw.setUpdatedAt(now);
+        raw.setCreateTime(now);
+        raw.setUpdateTime(now);
         return raw;
     }
 

@@ -70,9 +70,9 @@ public class TgRawMessage {
     private String lastError;
     /** worker 抢占开始处理的时间，用于超时回收。 */
     private LocalDateTime processingStartedAt;
-    /** 创建时间。 */
-    private LocalDateTime createdAt;
-    /** 更新时间。 */
-    private LocalDateTime updatedAt;
+    /** 入库时间。 */
+    private LocalDateTime createTime;
+    /** 最后更新时间。 */
+    private LocalDateTime updateTime;
 
 }

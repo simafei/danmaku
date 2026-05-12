@@ -44,13 +44,13 @@ public class DanmakuPushService {
         DanmakuPushLog log = new DanmakuPushLog();
         log.setRawMessageId(rawMessage.getId());
         log.setDecisionId(decisionLog.getId());
-        log.setSymbol(aiResult.getMatchedEvent());
+        log.setMatchedEvent(aiResult.getMatchedEvent());
         log.setLanguage(rawMessage.getLanguage());
         log.setPushContent(content);
         log.setPushStatus(result.isSuccess() ? "success" : "failed");
         log.setResponseBody(result.getResponseBody());
         log.setRequestId(result.getRequestId());
-        log.setPushedAt(LocalDateTime.now());
+        log.setCreateTime(LocalDateTime.now());
         pushLogMapper.insert(log);
     }
 }

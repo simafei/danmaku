@@ -59,8 +59,8 @@ public class GroupConfigController {
         config.setPushEnabled(req.getPushEnabled() != null ? req.getPushEnabled() : true);
         config.setSortWeight(req.getSortWeight() != null ? req.getSortWeight() : 0);
         config.setTrustLevel(0);
-        config.setCreatedAt(LocalDateTime.now());
-        config.setUpdatedAt(LocalDateTime.now());
+        config.setCreateTime(LocalDateTime.now());
+        config.setUpdateTime(LocalDateTime.now());
         groupConfigMapper.insert(config);
         // 新增群后立即同步一次管理员，确保入群消息立刻被正确过滤
         try {
@@ -92,7 +92,7 @@ public class GroupConfigController {
         int updated = groupConfigMapper.update(null, new LambdaUpdateWrapper<TgGroupConfig>()
                 .eq(TgGroupConfig::getGroupId, groupId)
                 .set(TgGroupConfig::getEnabled, req.getEnabled())
-                .set(TgGroupConfig::getUpdatedAt, LocalDateTime.now()));
+                .set(TgGroupConfig::getUpdateTime, LocalDateTime.now()));
         return updated > 0 ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
     }
 
