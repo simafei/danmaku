@@ -23,6 +23,8 @@ public class AiDanmakuResult {
     private boolean displayable;
     /** 从事件列表中匹配到的事件或交易对；无匹配时为空。 */
     private String matchedEvent;
+    /** 结合当前消息和上下文提炼的具体话题，6–20字；displayable=false 时为空。 */
+    private String topic;
     /** 对 matchedEvent 匹配的置信度，0–100。 */
     private Integer confidence;
     /** 源语言代码，如 zh / en / ru。 */

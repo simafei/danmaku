@@ -35,6 +35,7 @@ public class DanmakuPushService {
         request.setMatchedEvent(aiResult.getMatchedEvent());
         request.setLanguage(rawMessage.getLanguage());
         request.setContent(content);
+        request.setTopic(aiResult.getTopic());
         request.setConfidence(aiResult.getConfidence());
         request.setMarketType(aiResult.getMarketType());
 

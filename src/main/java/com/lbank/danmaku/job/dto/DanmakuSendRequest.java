@@ -15,6 +15,8 @@ public class DanmakuSendRequest {
     private String language;
     /** 弹幕正文，即原始消息文本。 */
     private String content;
+    /** 结合上下文提炼的具体话题描述。 */
+    private String topic;
     /** AI 匹配置信度，0–100。 */
     private Integer confidence;
     /** 市场类型：SPOT / FUTURE；非加密货币或无法判断时为空。 */

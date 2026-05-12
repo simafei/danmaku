@@ -91,6 +91,7 @@ class AiDanmakuGenerateTest {
         System.out.println("\n========== " + caseName + " ==========");
         System.out.println("  displayable   : " + r.isDisplayable());
         System.out.println("  matchedEvent  : " + r.getMatchedEvent());
+        System.out.println("  topic         : " + r.getTopic());
         System.out.println("  marketType    : " + r.getMarketType());
         System.out.println("  confidence    : " + r.getConfidence());
         System.out.println("  ad            : " + r.isAd()

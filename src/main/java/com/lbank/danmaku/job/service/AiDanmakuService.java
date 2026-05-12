@@ -65,7 +65,13 @@ public class AiDanmakuService {
                 - 选取与当前消息及上下文语义最相关的一项
                 - 若消息与列表中任何事件都不相关，或 displayable=false，填空字符串
 
-                ## 三、marketType（仅加密货币讨论时填写）
+                ## 三、topic（话题提炼）
+                - 结合当前消息和上下文，提炼正在讨论的具体话题
+                - 中文 6–20 字，英文 5–15 词；语言与消息保持一致
+                - 例如："美伊局势引发BTC暴跌""以太合约多单爆仓风险""XRP胜诉利好""世界杯决赛点球大战"
+                - displayable=false 时留空
+
+                ## 四、marketType（仅加密货币讨论时填写）
                 - 当消息明确讨论加密货币的合约或现货交易时填写，否则留空字符串
                 - FUTURE：提到做多、做空、爆仓、资金费率、永续合约、杠杆、多单、空单
                 - SPOT：提到买入、卖出、现货、持币，且没有合约相关语境
@@ -82,7 +88,7 @@ public class AiDanmakuService {
                 - 所有字段必须存在，缺失值用空字符串，布尔型用 false，数字型用 0
 
                 JSON 字段列表：
-                ad, adReason, displayable, matchedEvent, marketType, confidence, sourceLanguage
+                ad, adReason, displayable, matchedEvent, topic, marketType, confidence, sourceLanguage
                 """;
     }
 

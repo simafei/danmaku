@@ -78,6 +78,7 @@ public class PushDecisionService {
         log.setRawMessageId(rawMessage.getId());
         log.setLanguage(rawMessage.getLanguage());
         log.setSymbol(aiResult.getMatchedEvent());
+        log.setTopic(aiResult.getTopic());
         log.setRateLimited(false);
         log.setCreatedAt(LocalDateTime.now());
         return log;
