@@ -44,8 +44,10 @@ public class AiDanmakuService {
 
     private String systemPrompt() {
         return """
-                你是加密货币 K 线页面的弹幕内容助手。
-                输入是来自 Telegram 官方群的一条消息及其近期上下文，你需要分析消息内容并填写以下 JSON 字段。
+                你是加密货币社区消息的分析助手。
+                输入是来自 Telegram 官方群的一条消息及其近期上下文，你需要完成两件事：
+                1. 过滤掉不值得展示的消息
+                2. 从有效消息中提炼出正在讨论的话题和事件
 
                 ## 一、displayable 判断
                 以下情况填 false，其余填 true：
@@ -56,23 +58,19 @@ public class AiDanmakuService {
 
                 ## 二、symbol 识别
                 - 格式必须是 USDT 计价交易对，例如 BTCUSDT、ETHUSDT、SOLUSDT、XRPUSDT
-                - 根据消息语义判断，不要猜测
+                - 根据消息语义判断，不要猜测；币对本身就是一种事件，能识别出来就填
                 - 多个交易对时只填最主要的一个
                 - 无法确定时留空字符串
 
-                ## 三、content 生成
-                - 仅在 displayable=true 且 symbol 不为空时生成，否则留空
-                - 必须使用原始消息的主要语言，不做翻译
-                - 长度：中文 8–20 字，英文 6–15 词，其他语言等比
-                - 口语化，像真实用户在 K 线页随手发的一句弹幕
-                - 禁止：喊单（快买/快跑）、绝对判断（必涨/必跌）、收益承诺
-                - 禁止：系统播报腔（"群内讨论升温""用户认为""市场情绪"）
-                - 禁止：编造原文没有的信息，不伪造具体身份（如"群主说""大户确认"）
-                - 正文不重复币对名称，页面已经是对应交易对的 K 线页
-                - 结合上下文的具体细节生成，同一事件不要重复使用相同句式
+                ## 三、topic（核心话题）提炼
+                - 结合当前消息和上下文，提炼出正在讨论的核心话题或事件
+                - 中文 6–20 字，英文 5–15 词；语言与消息保持一致
+                - 要能说明"在讨论什么"，例如：
+                    "BTC 量能放大是否突破前高""以太多单爆仓风险""XRP 胜诉监管利好""美联储暂停加息短线反应"
+                - displayable=false 时留空
 
                 ## 四、eventType 说明
-                - price：价格走势、突破、支撑压力位、涨跌幅讨论
+                - price：价格走势、突破、支撑压力位、涨跌幅
                 - news：公告、上所、合作、监管、宏观事件
                 - opinion：个人观点、看法、预测、分析
                 - question：提问
@@ -80,20 +78,19 @@ public class AiDanmakuService {
 
                 ## 五、其他字段说明
                 - sentiment：bullish（看涨）/ bearish（看跌）/ neutral（中性或无法判断）
-                - confidence：0–100，你对 symbol 识别和 displayable 判断的综合把握程度
-                - topic：4–12 字的话题关键词，用于分享展示；无明确话题时留空
+                - confidence：0–100，对 symbol 识别和 displayable 判断的综合把握程度
                 - ad：是否广告或导流内容
                 - adReason：广告判断原因，ad=false 时留空
                 - sourceLanguage：原始消息的语言代码，如 zh、en、ru、tr
-                - marketType：市场类型，SPOT（现货）或 FUTURE（合约/永续/杠杆）；根据消息语义判断，区分不出时留空字符串
-                  判断依据举例：提到"做多/做空/爆仓/资金费率/永续/杠杆/合约"→ FUTURE；提到"买入/卖出/持仓/现货"且无合约语境 → SPOT
+                - marketType：SPOT（现货）或 FUTURE（合约/永续/杠杆）；区分不出时留空
+                  判断依据：提到"做多/做空/爆仓/资金费率/永续/杠杆/合约"→ FUTURE；提到"买入/卖出/持仓/现货"且无合约语境 → SPOT
 
                 ## 六、输出要求
                 - 只输出合法 JSON 对象，不加 Markdown 代码块，不写任何解释
                 - 所有字段必须存在，缺失值用空字符串，布尔型用 false，数字型用 0
 
                 JSON 字段列表：
-                ad, adReason, displayable, symbol, marketType, eventType, sentiment, topic, confidence, sourceLanguage, content
+                ad, adReason, displayable, symbol, marketType, eventType, sentiment, topic, confidence, sourceLanguage
                 """;
     }
 
@@ -192,12 +189,6 @@ public class AiDanmakuService {
         }
         if (!StringUtils.hasText(result.getModelName()) && response != null) {
             result.setModelName(response.getModel());
-        }
-        // AI 未生成弹幕文案时不以原始消息兜底推送，改为 hold，避免把未经处理的长文本发出去。
-        if (!StringUtils.hasText(result.getContent())) {
-            result.setDecision("hold");
-            result.setDecisionReason("empty_content");
-            result.setDisplayable(false);
         }
     }
 

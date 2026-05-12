@@ -16,11 +16,12 @@ import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * AI 弹幕生成集成测试（OpenAI 兼容接口）。
+ * AI 消息过滤 + 话题/事件提炼集成测试（OpenAI 兼容接口）。
  *
  * 运行前需设置环境变量：
  *   export AI_API_KEY=sk-xxx
- *   export AI_BASE_URL=https://...  （可选，默认读取 application.yml）
+ *   export AI_BASE_URL=https://...  （可选）
+ *   export AI_MODEL=xxx             （可选）
  * 或通过 Maven 传入：
  *   mvn test -DAI_API_KEY=sk-xxx -Dtest=AiDanmakuGenerateTest
  */
@@ -83,19 +84,18 @@ class AiDanmakuGenerateTest {
 
     static void print(String caseName, AiDanmakuResult r) {
         System.out.println("\n========== " + caseName + " ==========");
-        System.out.println("  displayable  : " + r.isDisplayable());
-        System.out.println("  symbol       : " + r.getSymbol());
-        System.out.println("  marketType   : " + r.getMarketType());
-        System.out.println("  eventType    : " + r.getEventType());
-        System.out.println("  sentiment    : " + r.getSentiment());
-        System.out.println("  confidence   : " + r.getConfidence());
-        System.out.println("  ad           : " + r.isAd()
+        System.out.println("  displayable   : " + r.isDisplayable());
+        System.out.println("  symbol        : " + r.getSymbol());
+        System.out.println("  marketType    : " + r.getMarketType());
+        System.out.println("  eventType     : " + r.getEventType());
+        System.out.println("  sentiment     : " + r.getSentiment());
+        System.out.println("  confidence    : " + r.getConfidence());
+        System.out.println("  ad            : " + r.isAd()
                 + (r.getAdReason() != null && !r.getAdReason().isBlank()
                    ? " (" + r.getAdReason() + ")" : ""));
-        System.out.println("  topic        : " + r.getTopic());
+        System.out.println("  topic         : " + r.getTopic());
         System.out.println("  sourceLanguage: " + r.getSourceLanguage());
-        System.out.println("  content      : " + r.getContent());
-        System.out.println("  model        : " + r.getModelName());
+        System.out.println("  model         : " + r.getModelName());
     }
 
     // ── 测试用例 ─────────────────────────────────────────────────

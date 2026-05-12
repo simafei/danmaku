@@ -40,7 +40,7 @@ public class PushDecisionService {
             decisionLogMapper.insert(log);
             return log;
         }
-        String dedupeKey = "tg:dedupe:" + sha256(aiResult.getSymbol() + ":" + aiResult.getContent());
+        String dedupeKey = "tg:dedupe:" + sha256(aiResult.getSymbol() + ":" + aiResult.getTopic());
         log.setDedupeKey(dedupeKey);
         // Redis 只做短时间窗口记忆，用于拦截重复或近似重复消息；MySQL 仍是审计来源。
         Boolean dedupeSet = redisTemplate.opsForValue().setIfAbsent(
@@ -81,7 +81,7 @@ public class PushDecisionService {
         log.setEventType(aiResult.getEventType());
         log.setSentiment(aiResult.getSentiment());
         log.setTopic(aiResult.getTopic());
-        log.setFinalContent(aiResult.getContent());
+        log.setFinalContent(null);
         log.setRateLimited(false);
         log.setCreatedAt(LocalDateTime.now());
         return log;
