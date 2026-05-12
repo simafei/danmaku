@@ -5,7 +5,6 @@ import com.lbank.danmaku.job.config.DanmakuProperties;
 import com.lbank.danmaku.job.domain.TgRawMessage;
 import com.lbank.danmaku.job.dto.AiDanmakuResult;
 import com.lbank.danmaku.job.service.AiDanmakuService;
-import com.lbank.danmaku.job.service.StubEventProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -59,7 +58,12 @@ class AiDanmakuGenerateTest {
         ObjectMapper objectMapper = new ObjectMapper();
 
         OpenAiCompatibleDanmakuClient client = new OpenAiCompatibleDanmakuClient(props, restTemplate, objectMapper);
-        aiService = new AiDanmakuService(client, new StubEventProvider(), props, objectMapper);
+        // 测试用事件列表：混合了加密货币交易对和非加密事件，验证通用匹配能力
+        List<String> testEvents = List.of(
+                "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT",
+                "2026年世界杯", "美伊局势", "美联储加息"
+        );
+        aiService = new AiDanmakuService(client, () -> testEvents, props, objectMapper);
     }
 
     // ── 工具方法 ─────────────────────────────────────────────────
@@ -196,5 +200,32 @@ class AiDanmakuGenerateTest {
         print("BTC 宏观新闻", result);
         assert result.isDisplayable() : "预期 displayable=true";
         assert "BTCUSDT".equals(result.getMatchedEvent()) : "预期 matchedEvent=BTCUSDT, 实际: " + result.getMatchedEvent();
+    }
+
+    @Test
+    @DisplayName("非加密事件：世界杯讨论")
+    void worldCupDiscussion() {
+        TgRawMessage current = msg(8001, "fan",
+                "昨晚决赛太精彩了，点球大战真的刺激，C罗这场表现封神", null, null);
+        List<TgRawMessage> ctx = List.of(
+                msg(8000, "fan2", "这届世界杯水平比上届高很多", null,
+                        LocalDateTime.now().minusMinutes(1))
+        );
+        AiDanmakuResult result = aiService.generate(current, ctx);
+        print("世界杯讨论", result);
+        assert result.isDisplayable() : "预期 displayable=true";
+        assert "2026年世界杯".equals(result.getMatchedEvent()) : "预期 matchedEvent=2026年世界杯, 实际: " + result.getMatchedEvent();
+    }
+
+    @Test
+    @DisplayName("与事件列表无关的内容")
+    void noMatchingEvent() {
+        TgRawMessage current = msg(9001, "user",
+                "今天天气真好，适合出去散步", null, null);
+        AiDanmakuResult result = aiService.generate(current, List.of());
+        print("与事件无关", result);
+        // 无匹配事件，matchedEvent 应为空
+        assert result.getMatchedEvent() == null || result.getMatchedEvent().isBlank()
+                : "预期 matchedEvent 为空";
     }
 }

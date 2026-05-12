@@ -5,23 +5,17 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.stereotype.Service;
 
 /**
- * EventProvider 默认占位实现。
+ * EventProvider 默认占位实现，返回空列表。
  *
- * 返回常见加密货币交易对，供开发和测试使用。
- * 接入真实事件数据源后此 Bean 自动失效。
+ * 事件列表由业务方提供（数据库、配置中心、外部 API 等），
+ * 实现 EventProvider 并注册为 Bean 后此占位自动失效。
  */
 @Service
 @ConditionalOnMissingBean(EventProvider.class)
 public class StubEventProvider implements EventProvider {
 
-    private static final List<String> DEFAULT_EVENTS = List.of(
-            "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT",
-            "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT",
-            "MATICUSDT", "UNIUSDT", "LTCUSDT", "BCHUSDT", "ATOMUSDT"
-    );
-
     @Override
     public List<String> getActiveEvents() {
-        return DEFAULT_EVENTS;
+        return List.of();
     }
 }
