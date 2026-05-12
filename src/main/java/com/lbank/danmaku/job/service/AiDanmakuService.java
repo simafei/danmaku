@@ -16,25 +16,30 @@ import org.springframework.util.StringUtils;
 @Service
 public class AiDanmakuService {
     private final AiDanmakuClient aiDanmakuClient;
+    private final EventProvider eventProvider;
     private final DanmakuProperties properties;
     private final ObjectMapper objectMapper;
 
     public AiDanmakuService(
             AiDanmakuClient aiDanmakuClient,
+            EventProvider eventProvider,
             DanmakuProperties properties,
             ObjectMapper objectMapper) {
         this.aiDanmakuClient = aiDanmakuClient;
+        this.eventProvider = eventProvider;
         this.properties = properties;
         this.objectMapper = objectMapper;
     }
 
     public AiDanmakuResult generate(TgRawMessage rawMessage, List<TgRawMessage> contextMessages) {
+        List<String> events = eventProvider.getActiveEvents();
+
         AiPromptRequest request = new AiPromptRequest();
         request.setModel(properties.getAi().getModel());
         request.setTemperature(properties.getAi().getTemperature());
         request.setResponseFormat(properties.getAi().getResponseFormat());
         request.setSystemPrompt(systemPrompt());
-        request.setUserPrompt(userPrompt(rawMessage, contextMessages));
+        request.setUserPrompt(userPrompt(rawMessage, contextMessages, events));
 
         AiPromptResponse response = aiDanmakuClient.complete(request);
         AiDanmakuResult result = parseResult(response);
@@ -44,59 +49,51 @@ public class AiDanmakuService {
 
     private String systemPrompt() {
         return """
-                你是加密货币社区消息的分析助手。
-                输入是来自 Telegram 官方群的一条消息及其近期上下文，你需要完成两件事：
-                1. 过滤掉不值得展示的消息
-                2. 从有效消息中提炼出正在讨论的话题和事件
+                你是加密货币社区消息的过滤和分类助手。
+                输入包含一条 Telegram 群消息、近期上下文，以及一个【事件列表】。
+                你需要完成两件事：
+                1. 判断消息是否值得展示（过滤广告、水聊）
+                2. 从事件列表中找到与消息最相关的一条，作为 matchedEvent 输出
 
                 ## 一、displayable 判断
                 以下情况填 false，其余填 true：
                 - 广告、导流链接、返佣、带单、拉群邀请
                 - 纯表情、纯寒暄、无意义水聊（例如"哈哈""好的""666"）
                 - 与加密货币行情完全无关的闲聊
-                - 无法识别出关联交易对的消息
 
-                ## 二、symbol 识别
-                - 格式必须是 USDT 计价交易对，例如 BTCUSDT、ETHUSDT、SOLUSDT、XRPUSDT
-                - 根据消息语义判断，不要猜测；币对本身就是一种事件，能识别出来就填
-                - 多个交易对时只填最主要的一个
-                - 无法确定时留空字符串
+                ## 二、matchedEvent（事件匹配）
+                - 必须从【事件列表】中原文选取一项，不得修改或拼造
+                - 选取与当前消息及上下文语义最相关的一项
+                - 若消息与列表中任何事件都不相关，或 displayable=false，填空字符串
 
-                ## 三、topic（核心话题）提炼
-                - 结合当前消息和上下文，提炼出正在讨论的核心话题或事件
-                - 中文 6–20 字，英文 5–15 词；语言与消息保持一致
-                - 要能说明"在讨论什么"，例如：
-                    "BTC 量能放大是否突破前高""以太多单爆仓风险""XRP 胜诉监管利好""美联储暂停加息短线反应"
-                - displayable=false 时留空
-
-                ## 四、eventType 说明
-                - price：价格走势、突破、支撑压力位、涨跌幅
-                - news：公告、上所、合作、监管、宏观事件
-                - opinion：个人观点、看法、预测、分析
-                - question：提问
-                - other：以上都不符合
-
-                ## 五、其他字段说明
-                - sentiment：bullish（看涨）/ bearish（看跌）/ neutral（中性或无法判断）
-                - confidence：0–100，对 symbol 识别和 displayable 判断的综合把握程度
+                ## 三、其他字段说明
+                - confidence：0–100，对 matchedEvent 选择的把握程度；displayable=false 时填 0
                 - ad：是否广告或导流内容
                 - adReason：广告判断原因，ad=false 时留空
                 - sourceLanguage：原始消息的语言代码，如 zh、en、ru、tr
-                - marketType：SPOT（现货）或 FUTURE（合约/永续/杠杆）；区分不出时留空
-                  判断依据：提到"做多/做空/爆仓/资金费率/永续/杠杆/合约"→ FUTURE；提到"买入/卖出/持仓/现货"且无合约语境 → SPOT
 
-                ## 六、输出要求
+                ## 四、输出要求
                 - 只输出合法 JSON 对象，不加 Markdown 代码块，不写任何解释
                 - 所有字段必须存在，缺失值用空字符串，布尔型用 false，数字型用 0
 
                 JSON 字段列表：
-                ad, adReason, displayable, symbol, marketType, eventType, sentiment, topic, confidence, sourceLanguage
+                ad, adReason, displayable, matchedEvent, confidence, sourceLanguage
                 """;
     }
 
-    private String userPrompt(TgRawMessage rawMessage, List<TgRawMessage> contextMessages) {
+    private String userPrompt(TgRawMessage rawMessage, List<TgRawMessage> contextMessages,
+                               List<String> events) {
         StringBuilder builder = new StringBuilder();
-        builder.append("弹幕语言：").append(rawMessage == null ? "" : nullToEmpty(rawMessage.getLanguage())).append('\n');
+
+        // 事件列表
+        builder.append("【事件列表】\n");
+        if (events == null || events.isEmpty()) {
+            builder.append("（无）\n");
+        } else {
+            for (String event : events) {
+                builder.append("- ").append(event).append('\n');
+            }
+        }
         builder.append('\n');
 
         // 当前消息
@@ -124,7 +121,6 @@ public class AiDanmakuService {
         StringBuilder sb = new StringBuilder();
         sb.append("user=").append(nullToEmpty(message.getSenderUsername()))
           .append(", text=").append(nullToEmpty(message.getNormalizedText()));
-        // 如果是回复消息，附上被回复的内容帮助 AI 理解语境
         if (StringUtils.hasText(message.getReplyToText())) {
             sb.append("\n  ↳ 回复的消息：").append(message.getReplyToText().trim());
         }
@@ -136,11 +132,7 @@ public class AiDanmakuService {
         String timeLabel = "";
         if (ctx.getSentAt() != null && current != null && current.getSentAt() != null) {
             long secondsBefore = ChronoUnit.SECONDS.between(ctx.getSentAt(), current.getSentAt());
-            if (secondsBefore < 60) {
-                timeLabel = secondsBefore + "秒前";
-            } else {
-                timeLabel = (secondsBefore / 60) + "分钟前";
-            }
+            timeLabel = secondsBefore < 60 ? secondsBefore + "秒前" : (secondsBefore / 60) + "分钟前";
         }
         return "- [" + timeLabel + "] user=" + nullToEmpty(ctx.getSenderUsername())
                 + ", text=" + nullToEmpty(ctx.getNormalizedText());

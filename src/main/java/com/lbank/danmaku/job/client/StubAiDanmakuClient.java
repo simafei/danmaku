@@ -19,7 +19,7 @@ public class StubAiDanmakuClient implements AiDanmakuClient {
         AiPromptResponse response = new AiPromptResponse();
         response.setModel(request == null ? null : request.getModel());
         response.setContent("""
-                {"decision":"hold","decisionReason":"ai_client_not_implemented","ad":false,"displayable":false,"confidence":0,"content":""}
+                {"ad":false,"adReason":"","displayable":false,"matchedEvent":"","confidence":0,"sourceLanguage":""}
                 """);
         return response;
     }

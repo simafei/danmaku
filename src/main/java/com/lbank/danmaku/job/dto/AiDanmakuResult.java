@@ -3,36 +3,30 @@ package com.lbank.danmaku.job.dto;
 import lombok.Data;
 
 /**
- * AI 分析结果：过滤 + 话题/事件提炼。
+ * AI 分析结果：过滤 + 事件匹配。
  *
- * 不生成弹幕文案，只输出结构化的过滤标记和事件元数据。
+ * AI 只负责两件事：
+ * 1. 判断消息是否值得展示（过滤广告、水聊）
+ * 2. 从提供的事件列表中匹配最相关的一条
  */
 @Data
 public class AiDanmakuResult {
-    /** 最终建议：push、discard、hold。 */
+    /** 内部流转建议：push、discard、hold。 */
     private String decision;
-    /** 建议原因，便于排查为什么没推送。 */
+    /** 建议原因，便于排查。 */
     private String decisionReason;
     /** 是否广告、导流、返佣或带单。 */
     private boolean ad;
     /** 广告判断原因。 */
     private String adReason;
-    /** 是否适合展示（过滤广告、水聊、无关内容后）。 */
+    /** 是否值得展示（非广告、非水聊、与加密行情相关）。 */
     private boolean displayable;
-    /** 关联交易对，格式如 BTCUSDT；无明确交易对时为空。 */
-    private String symbol;
-    /** 事件类型：price / news / opinion / question / other。 */
-    private String eventType;
-    /** 情绪倾向：bullish / bearish / neutral。 */
-    private String sentiment;
-    /** 结合当前消息和上下文提炼的核心话题，6–20字。 */
-    private String topic;
-    /** 置信度，0–100。 */
+    /** 从事件列表中匹配到的事件或交易对；无匹配时为空。 */
+    private String matchedEvent;
+    /** 对 matchedEvent 匹配的置信度，0–100。 */
     private Integer confidence;
     /** 源语言代码，如 zh / en / ru。 */
     private String sourceLanguage;
-    /** 市场类型：SPOT（现货）/ FUTURE（合约）；无法判断时为空。 */
-    private String marketType;
     /** AI 模型名称，便于日志排查。 */
     private String modelName;
 }

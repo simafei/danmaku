@@ -41,7 +41,8 @@ public class DanmakuProperties {
         private int minConfidence = 50;
         private long symbolRateLimitSeconds = 15;
         private long duplicateTtlSeconds = 60;
-
+        /** 原始消息字数上限，超过此长度不推送弹幕。 */
+        private int maxContentLength = 30;
     }
 
     @Data

@@ -38,6 +38,7 @@ danmaku:
     min-confidence: 50
     symbol-rate-limit-seconds: 15
     duplicate-ttl-seconds: 60
+    max-content-length: 30
   ai:
     base-url: ${AI_BASE_URL:}
     api-key: ${AI_API_KEY:}

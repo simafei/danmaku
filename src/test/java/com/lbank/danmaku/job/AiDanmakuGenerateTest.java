@@ -5,6 +5,7 @@ import com.lbank.danmaku.job.config.DanmakuProperties;
 import com.lbank.danmaku.job.domain.TgRawMessage;
 import com.lbank.danmaku.job.dto.AiDanmakuResult;
 import com.lbank.danmaku.job.service.AiDanmakuService;
+import com.lbank.danmaku.job.service.StubEventProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -16,7 +17,7 @@ import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * AI 消息过滤 + 话题/事件提炼集成测试（OpenAI 兼容接口）。
+ * AI 消息过滤 + 事件匹配集成测试（OpenAI 兼容接口）。
  *
  * 运行前需设置环境变量：
  *   export AI_API_KEY=sk-xxx
@@ -58,7 +59,7 @@ class AiDanmakuGenerateTest {
         ObjectMapper objectMapper = new ObjectMapper();
 
         OpenAiCompatibleDanmakuClient client = new OpenAiCompatibleDanmakuClient(props, restTemplate, objectMapper);
-        aiService = new AiDanmakuService(client, props, objectMapper);
+        aiService = new AiDanmakuService(client, new StubEventProvider(), props, objectMapper);
     }
 
     // ── 工具方法 ─────────────────────────────────────────────────
@@ -85,15 +86,11 @@ class AiDanmakuGenerateTest {
     static void print(String caseName, AiDanmakuResult r) {
         System.out.println("\n========== " + caseName + " ==========");
         System.out.println("  displayable   : " + r.isDisplayable());
-        System.out.println("  symbol        : " + r.getSymbol());
-        System.out.println("  marketType    : " + r.getMarketType());
-        System.out.println("  eventType     : " + r.getEventType());
-        System.out.println("  sentiment     : " + r.getSentiment());
+        System.out.println("  matchedEvent  : " + r.getMatchedEvent());
         System.out.println("  confidence    : " + r.getConfidence());
         System.out.println("  ad            : " + r.isAd()
                 + (r.getAdReason() != null && !r.getAdReason().isBlank()
                    ? " (" + r.getAdReason() + ")" : ""));
-        System.out.println("  topic         : " + r.getTopic());
         System.out.println("  sourceLanguage: " + r.getSourceLanguage());
         System.out.println("  model         : " + r.getModelName());
     }
@@ -112,7 +109,7 @@ class AiDanmakuGenerateTest {
         AiDanmakuResult result = aiService.generate(current, ctx);
         print("BTC 现货看多情绪", result);
         assert result.isDisplayable() : "预期 displayable=true";
-        assert "BTCUSDT".equals(result.getSymbol()) : "预期 symbol=BTCUSDT";
+        assert "BTCUSDT".equals(result.getMatchedEvent()) : "预期 matchedEvent=BTCUSDT, 实际: " + result.getMatchedEvent();
     }
 
     @Test
@@ -130,7 +127,7 @@ class AiDanmakuGenerateTest {
         AiDanmakuResult result = aiService.generate(current, ctx);
         print("ETH 合约做多爆仓讨论", result);
         assert result.isDisplayable() : "预期 displayable=true";
-        assert "FUTURE".equals(result.getMarketType()) : "预期 marketType=FUTURE";
+        assert "ETHUSDT".equals(result.getMatchedEvent()) : "预期 matchedEvent=ETHUSDT, 实际: " + result.getMatchedEvent();
     }
 
     @Test
@@ -146,7 +143,7 @@ class AiDanmakuGenerateTest {
         AiDanmakuResult result = aiService.generate(current, ctx);
         print("SOL 带回复上下文", result);
         assert result.isDisplayable() : "预期 displayable=true";
-        assert "SOLUSDT".equals(result.getSymbol()) : "预期 symbol=SOLUSDT";
+        assert "SOLUSDT".equals(result.getMatchedEvent()) : "预期 matchedEvent=SOLUSDT, 实际: " + result.getMatchedEvent();
     }
 
     @Test
@@ -162,7 +159,7 @@ class AiDanmakuGenerateTest {
         AiDanmakuResult result = aiService.generate(current, ctx);
         print("英文群 XRP 新闻讨论", result);
         assert result.isDisplayable() : "预期 displayable=true";
-        assert "XRPUSDT".equals(result.getSymbol()) : "预期 symbol=XRPUSDT";
+        assert "XRPUSDT".equals(result.getMatchedEvent()) : "预期 matchedEvent=XRPUSDT, 实际: " + result.getMatchedEvent();
         assert "en".equals(result.getSourceLanguage()) : "预期 sourceLanguage=en";
     }
 
@@ -187,7 +184,7 @@ class AiDanmakuGenerateTest {
     }
 
     @Test
-    @DisplayName("BTC 宏观新闻（无明确多空）")
+    @DisplayName("BTC 宏观新闻")
     void btcMacroNews() {
         TgRawMessage current = msg(7001, "news_reader",
                 "美联储今晚宣布暂停加息，BTC短线反应还不错", null, null);
@@ -196,8 +193,8 @@ class AiDanmakuGenerateTest {
                         null, LocalDateTime.now().minusMinutes(5))
         );
         AiDanmakuResult result = aiService.generate(current, ctx);
-        print("BTC 宏观新闻（无明确多空）", result);
-        assert "BTCUSDT".equals(result.getSymbol()) : "预期 symbol=BTCUSDT";
-        assert "news".equals(result.getEventType()) : "预期 eventType=news";
+        print("BTC 宏观新闻", result);
+        assert result.isDisplayable() : "预期 displayable=true";
+        assert "BTCUSDT".equals(result.getMatchedEvent()) : "预期 matchedEvent=BTCUSDT, 实际: " + result.getMatchedEvent();
     }
 }

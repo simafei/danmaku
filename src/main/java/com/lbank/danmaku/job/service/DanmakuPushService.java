@@ -27,28 +27,28 @@ public class DanmakuPushService {
             TgRawMessage rawMessage,
             AiDanmakuResult aiResult,
             TgPushDecisionLog decisionLog) {
+        // 弹幕内容直接使用原始消息文本
+        String content = rawMessage.getNormalizedText();
+
         DanmakuSendRequest request = new DanmakuSendRequest();
         request.setRawMessageId(rawMessage.getId());
-        request.setSymbol(aiResult.getSymbol());
+        request.setMatchedEvent(aiResult.getMatchedEvent());
         request.setLanguage(rawMessage.getLanguage());
-        request.setEventType(aiResult.getEventType());
-        request.setSentiment(aiResult.getSentiment());
-        request.setTopic(aiResult.getTopic());
+        request.setContent(content);
         request.setConfidence(aiResult.getConfidence());
-        request.setMarketType(aiResult.getMarketType());
 
         DanmakuSendResult result = senderClient.send(request);
+
         DanmakuPushLog log = new DanmakuPushLog();
         log.setRawMessageId(rawMessage.getId());
         log.setDecisionId(decisionLog.getId());
-        log.setSymbol(aiResult.getSymbol());
+        log.setSymbol(aiResult.getMatchedEvent());
         log.setLanguage(rawMessage.getLanguage());
-        log.setTopic(aiResult.getTopic());
+        log.setPushContent(content);
         log.setPushStatus(result.isSuccess() ? "success" : "failed");
         log.setResponseBody(result.getResponseBody());
         log.setRequestId(result.getRequestId());
         log.setPushedAt(LocalDateTime.now());
         pushLogMapper.insert(log);
     }
-
 }

@@ -40,9 +40,10 @@ public class PushDecisionService {
             decisionLogMapper.insert(log);
             return log;
         }
-        String dedupeKey = "tg:dedupe:" + sha256(aiResult.getSymbol() + ":" + aiResult.getTopic());
+        // 以原始消息文本做去重，相同事件下相同内容短时间内不重复推
+        String text = nullToEmpty(rawMessage.getNormalizedText());
+        String dedupeKey = "tg:dedupe:" + sha256(aiResult.getMatchedEvent() + ":" + text);
         log.setDedupeKey(dedupeKey);
-        // Redis 只做短时间窗口记忆，用于拦截重复或近似重复消息；MySQL 仍是审计来源。
         Boolean dedupeSet = redisTemplate.opsForValue().setIfAbsent(
                 dedupeKey,
                 String.valueOf(rawMessage.getId()),
@@ -53,15 +54,14 @@ public class PushDecisionService {
             decisionLogMapper.insert(log);
             return log;
         }
-        String rateKey = "tg:rate:symbol:" + aiResult.getSymbol();
-        // 单币对限频只是保护阈值，产品决策仍然是逐条消息 push / discard / hold。
+        String rateKey = "tg:rate:event:" + aiResult.getMatchedEvent();
         Boolean rateSet = redisTemplate.opsForValue().setIfAbsent(
                 rateKey,
                 String.valueOf(rawMessage.getId()),
                 Duration.ofSeconds(properties.getDecision().getSymbolRateLimitSeconds()));
         if (Boolean.FALSE.equals(rateSet)) {
             log.setDecision(Decision.HOLD);
-            log.setDecisionReason("symbol_rate_limited");
+            log.setDecisionReason("event_rate_limited");
             log.setRateLimited(true);
             decisionLogMapper.insert(log);
             return log;
@@ -77,11 +77,7 @@ public class PushDecisionService {
         TgPushDecisionLog log = new TgPushDecisionLog();
         log.setRawMessageId(rawMessage.getId());
         log.setLanguage(rawMessage.getLanguage());
-        log.setSymbol(aiResult.getSymbol());
-        log.setEventType(aiResult.getEventType());
-        log.setSentiment(aiResult.getSentiment());
-        log.setTopic(aiResult.getTopic());
-        log.setFinalContent(null);
+        log.setSymbol(aiResult.getMatchedEvent());
         log.setRateLimited(false);
         log.setCreatedAt(LocalDateTime.now());
         return log;
@@ -100,11 +96,16 @@ public class PushDecisionService {
         if (!aiResult.isDisplayable()) {
             return "not_displayable";
         }
-        if (!StringUtils.hasText(aiResult.getSymbol())) {
-            return "no_symbol";
+        if (!StringUtils.hasText(aiResult.getMatchedEvent())) {
+            return "no_matched_event";
         }
         if (aiResult.getConfidence() == null || aiResult.getConfidence() < properties.getDecision().getMinConfidence()) {
             return "low_confidence";
+        }
+        // 原始消息超过字数限制不推送弹幕
+        String text = nullToEmpty(rawMessage.getNormalizedText());
+        if (text.length() > properties.getDecision().getMaxContentLength()) {
+            return "content_too_long";
         }
         return null;
     }
