@@ -47,16 +47,19 @@ public class DanmakuTemplateController {
     }
 
     /**
-     * 随机推荐弹幕模板供用户选择。
+     * 根据用户输入推荐弹幕模板。
      *
-     * GET /danmaku-templates/recommend?event=BTCUSDT&language=zh&limit=3
+     * GET /danmaku-templates/recommend?event=BTCUSDT&language=zh&limit=3&input=以太坊今天
+     *
+     * <p>input 可选。有 input 时 AI 按语义匹配排序；无 input 时随机返回。
      */
     @GetMapping("/recommend")
     public ResponseEntity<List<DanmakuTemplate>> recommend(
             @RequestParam String event,
             @RequestParam(defaultValue = "zh") String language,
-            @RequestParam(defaultValue = "3") int limit) {
-        List<DanmakuTemplate> items = templateService.recommend(event, language, Math.min(limit, 10));
+            @RequestParam(defaultValue = "3") int limit,
+            @RequestParam(required = false) String input) {
+        List<DanmakuTemplate> items = templateService.recommend(event, language, Math.min(limit, 10), input);
         return ResponseEntity.ok(items);
     }
 

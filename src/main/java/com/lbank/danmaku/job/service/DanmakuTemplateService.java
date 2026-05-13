@@ -9,7 +9,15 @@ import com.lbank.danmaku.job.dto.AiPromptRequest;
 import com.lbank.danmaku.job.dto.AiPromptResponse;
 import com.lbank.danmaku.job.mapper.DanmakuTemplateMapper;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -22,6 +30,12 @@ public class DanmakuTemplateService {
 
     /** 每次 AI 调用生成的条数。 */
     private static final int BATCH_SIZE = 50;
+    /** 推荐时从数据库随机拉取的候选池大小。 */
+    private static final int RECOMMEND_POOL_SIZE = 100;
+    /** BM25 词频饱和参数，控制词频对分数的影响上限。 */
+    private static final double BM25_K1 = 1.5;
+    /** BM25 文档长度归一化参数。 */
+    private static final double BM25_B = 0.75;
 
     private final AiDanmakuClient aiDanmakuClient;
     private final DanmakuTemplateMapper templateMapper;
@@ -67,14 +81,22 @@ public class DanmakuTemplateService {
     }
 
     /**
-     * 随机推荐弹幕模板。
+     * 根据用户输入推荐弹幕模板。
+     *
+     * <p>从数据库随机拉取 {@value RECOMMEND_POOL_SIZE} 条候选池，有输入时用 BM25 在内存中排序；
+     * 无输入或候选池不足时直接返回随机结果。
      *
      * @param matchedEvent 事件或交易对
      * @param language     语言代码
      * @param limit        推荐条数，通常为 3
+     * @param userInput    用户正在输入的文字（可为空）
      */
-    public List<DanmakuTemplate> recommend(String matchedEvent, String language, int limit) {
-        return templateMapper.selectRandom(matchedEvent, language, limit);
+    public List<DanmakuTemplate> recommend(String matchedEvent, String language, int limit, String userInput) {
+        List<DanmakuTemplate> pool = templateMapper.selectRandom(matchedEvent, language, RECOMMEND_POOL_SIZE);
+        if (pool.size() <= limit || !StringUtils.hasText(userInput)) {
+            return pool.subList(0, Math.min(limit, pool.size()));
+        }
+        return rankBm25(userInput.trim(), pool, limit);
     }
 
     /**
@@ -140,6 +162,72 @@ public class DanmakuTemplateService {
     private String userPrompt(String matchedEvent, String language, int count, int batchIndex) {
         return "话题事件：%s\n语言：%s\n请生成 %d 条弹幕模板（第 %d 批，风格与之前批次有所不同）。"
                 .formatted(matchedEvent, language, count, batchIndex);
+    }
+
+    /**
+     * BM25 排序：对候选池中每条模板打分，返回得分最高的 limit 条。
+     *
+     * <p>词元化采用字符 bigram（连续两字符），适合中文和中英混合文本。
+     * 所有文本统一小写，去除空白后处理。
+     */
+    private List<DanmakuTemplate> rankBm25(String query, List<DanmakuTemplate> pool, int limit) {
+        List<String> queryTokens = tokenize(query);
+        if (queryTokens.isEmpty()) {
+            return pool.subList(0, limit);
+        }
+        Set<String> queryTerms = new LinkedHashSet<>(queryTokens);
+        int N = pool.size();
+
+        // 对所有候选文档做词元化
+        List<List<String>> docTokens = pool.stream()
+                .map(t -> tokenize(t.getContent()))
+                .toList();
+
+        double avgdl = docTokens.stream().mapToInt(List::size).average().orElse(1.0);
+
+        // IDF：每个查询词在多少文档中出现
+        Map<String, Double> idf = new HashMap<>();
+        for (String term : queryTerms) {
+            long df = docTokens.stream().filter(tokens -> tokens.contains(term)).count();
+            idf.put(term, Math.log((N - df + 0.5) / (df + 0.5) + 1.0));
+        }
+
+        // BM25 打分
+        double[] scores = new double[N];
+        for (int i = 0; i < N; i++) {
+            List<String> tokens = docTokens.get(i);
+            int dl = tokens.size();
+            if (dl == 0) continue;
+            Map<String, Long> tf = tokens.stream()
+                    .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+            for (String term : queryTerms) {
+                long freq = tf.getOrDefault(term, 0L);
+                if (freq == 0) continue;
+                scores[i] += idf.get(term)
+                        * (freq * (BM25_K1 + 1))
+                        / (freq + BM25_K1 * (1 - BM25_B + BM25_B * dl / avgdl));
+            }
+        }
+
+        // 按分数降序取前 limit 条
+        Integer[] order = IntStream.range(0, N).boxed().toArray(Integer[]::new);
+        Arrays.sort(order, (a, b) -> Double.compare(scores[b], scores[a]));
+        return Arrays.stream(order).limit(limit).map(pool::get).toList();
+    }
+
+    /**
+     * 字符 bigram 词元化。小写 + 去空白后，对每两个相邻字符生成一个词元。
+     *
+     * <p>示例："以太坊要涨" → ["以太", "太坊", "坊要", "要涨"]
+     */
+    private static List<String> tokenize(String text) {
+        if (text == null || text.length() < 2) return List.of();
+        List<String> tokens = new ArrayList<>();
+        String s = text.toLowerCase().replaceAll("\\s+", "");
+        for (int i = 0; i < s.length() - 1; i++) {
+            tokens.add(s.substring(i, i + 2));
+        }
+        return tokens;
     }
 
     private List<DanmakuTemplate> parseTemplates(String content, String matchedEvent, String language) {

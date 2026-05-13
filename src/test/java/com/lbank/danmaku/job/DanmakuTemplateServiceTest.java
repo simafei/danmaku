@@ -17,6 +17,7 @@ import com.lbank.danmaku.job.domain.DanmakuTemplate;
 import com.lbank.danmaku.job.dto.AiPromptResponse;
 import com.lbank.danmaku.job.mapper.DanmakuTemplateMapper;
 import com.lbank.danmaku.job.service.DanmakuTemplateService;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -218,26 +219,76 @@ class DanmakuTemplateServiceTest {
     // ── recommend ────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("recommend 委托给 mapper 并返回结果")
-    void recommend_delegatesToMapper() {
-        List<DanmakuTemplate> expected = List.of(new DanmakuTemplate(), new DanmakuTemplate(), new DanmakuTemplate());
-        when(templateMapper.selectRandom("BTCUSDT", "zh", 3)).thenReturn(expected);
+    @DisplayName("无用户输入时返回候选池前 limit 条（候选池已随机排序）")
+    void recommend_noInput_returnsPoolHead() {
+        List<DanmakuTemplate> pool = buildPool(10);
+        when(templateMapper.selectRandom("BTCUSDT", "zh", 100)).thenReturn(pool);
 
-        List<DanmakuTemplate> result = service.recommend("BTCUSDT", "zh", 3);
+        List<DanmakuTemplate> result = service.recommend("BTCUSDT", "zh", 3, null);
 
-        assertThat(result).isSameAs(expected);
-        verify(templateMapper).selectRandom("BTCUSDT", "zh", 3);
+        assertThat(result).hasSize(3);
+        assertThat(result.get(0)).isSameAs(pool.get(0));
+        assertThat(result.get(1)).isSameAs(pool.get(1));
+        assertThat(result.get(2)).isSameAs(pool.get(2));
     }
 
     @Test
-    @DisplayName("recommend 模板不足时返回实际有的条数")
-    void recommend_fewerThanRequested_returnsWhatExists() {
-        List<DanmakuTemplate> onlyOne = List.of(new DanmakuTemplate());
-        when(templateMapper.selectRandom("SOLUSDT", "zh", 3)).thenReturn(onlyOne);
+    @DisplayName("空白输入等同于无输入")
+    void recommend_blankInput_returnsPoolHead() {
+        List<DanmakuTemplate> pool = buildPool(10);
+        when(templateMapper.selectRandom(anyString(), anyString(), anyInt())).thenReturn(pool);
 
-        List<DanmakuTemplate> result = service.recommend("SOLUSDT", "zh", 3);
+        List<DanmakuTemplate> result = service.recommend("SOLUSDT", "zh", 3, "   ");
 
-        assertThat(result).hasSize(1);
+        assertThat(result).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("候选池不足 limit 时返回全部，不做 BM25")
+    void recommend_poolSmallerThanLimit_returnsAll() {
+        List<DanmakuTemplate> pool = buildPool(2);
+        when(templateMapper.selectRandom(anyString(), anyString(), anyInt())).thenReturn(pool);
+
+        List<DanmakuTemplate> result = service.recommend("SOLUSDT", "zh", 3, "sol要飞");
+
+        assertThat(result).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("BM25：语义相关的模板排在最前面")
+    void recommend_bm25_relevantTemplateRanksFirst() {
+        DanmakuTemplate irrelevant = template("比特币今天横盘了");
+        DanmakuTemplate relevant   = template("以太坊感觉要涨了涨涨涨");
+        DanmakuTemplate noise      = template("BTC量能在萎缩");
+        // relevant 故意放在列表末尾，验证 BM25 能把它排到第一
+        List<DanmakuTemplate> pool = new ArrayList<>(List.of(irrelevant, noise, relevant));
+        when(templateMapper.selectRandom(anyString(), anyString(), anyInt())).thenReturn(pool);
+
+        List<DanmakuTemplate> result = service.recommend("ETHUSDT", "zh", 1, "以太坊要涨");
+
+        assertThat(result.get(0)).isSameAs(relevant);
+    }
+
+    @Test
+    @DisplayName("BM25：无任何词元命中时仍返回 limit 条（分数全 0，保留原始随机顺序）")
+    void recommend_bm25_noTermHit_stillReturnsLimit() {
+        List<DanmakuTemplate> pool = buildPool(10);
+        when(templateMapper.selectRandom(anyString(), anyString(), anyInt())).thenReturn(pool);
+
+        // query 的 bigram 与所有模板内容完全无交集
+        List<DanmakuTemplate> result = service.recommend("BTCUSDT", "zh", 3, "zzz");
+
+        assertThat(result).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("BM25：mapper 只被调用一次，传入固定候选池大小 100")
+    void recommend_onlyOneMapperCallWithPoolSize100() {
+        when(templateMapper.selectRandom("BTCUSDT", "zh", 100)).thenReturn(buildPool(50));
+
+        service.recommend("BTCUSDT", "zh", 3, "btc涨了");
+
+        verify(templateMapper, times(1)).selectRandom("BTCUSDT", "zh", 100);
     }
 
     // ── count / clear ─────────────────────────────────────────────────
@@ -264,6 +315,18 @@ class DanmakuTemplateServiceTest {
         AiPromptResponse resp = new AiPromptResponse();
         resp.setContent(content);
         return resp;
+    }
+
+    private DanmakuTemplate template(String content) {
+        DanmakuTemplate t = new DanmakuTemplate();
+        t.setContent(content);
+        return t;
+    }
+
+    private List<DanmakuTemplate> buildPool(int n) {
+        List<DanmakuTemplate> list = new ArrayList<>();
+        for (int i = 0; i < n; i++) list.add(template("模板" + i));
+        return list;
     }
 
     /** 生成包含 n 条 item 的合法 JSON 字符串。 */
