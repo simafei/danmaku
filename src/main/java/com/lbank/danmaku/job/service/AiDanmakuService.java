@@ -71,24 +71,29 @@ public class AiDanmakuService {
                 - 例如："美伊局势引发BTC暴跌""以太合约多单爆仓风险""XRP胜诉利好""世界杯决赛点球大战"
                 - displayable=false 时留空
 
-                ## 四、marketType（仅加密货币讨论时填写）
+                ## 四、simplifiedContent（弹幕内容精简）
+                - 若当前消息文字长度超过 50 字，提供一个不超过 50 字的精简版本
+                - 精简时保留核心观点，语言与原文一致
+                - 若原文不超过 50 字，或 displayable=false，留空字符串
+
+                ## 五、marketType（仅加密货币讨论时填写）
                 - 当消息明确讨论加密货币的合约或现货交易时填写，否则留空字符串
                 - FUTURE：提到做多、做空、爆仓、资金费率、永续合约、杠杆、多单、空单
                 - SPOT：提到买入、卖出、现货、持币，且没有合约相关语境
                 - 无法判断或与加密交易无关：留空字符串
 
-                ## 四、其他字段说明
+                ## 六、其他字段说明
                 - confidence：0–100，对 matchedEvent 选择的把握程度；displayable=false 时填 0
                 - ad：是否广告或推广内容
                 - adReason：广告判断原因，ad=false 时留空
                 - sourceLanguage：原始消息的语言代码，如 zh、en、ru、tr
 
-                ## 五、输出要求
+                ## 七、输出要求
                 - 只输出合法 JSON 对象，不加 Markdown 代码块，不写任何解释
                 - 所有字段必须存在，缺失值用空字符串，布尔型用 false，数字型用 0
 
                 JSON 字段列表：
-                ad, adReason, displayable, matchedEvent, topic, marketType, confidence, sourceLanguage
+                ad, adReason, displayable, matchedEvent, topic, simplifiedContent, marketType, confidence, sourceLanguage
                 """;
     }
 

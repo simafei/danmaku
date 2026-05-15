@@ -25,6 +25,8 @@ public class AiDanmakuResult {
     private String matchedEvent;
     /** 结合当前消息和上下文提炼的具体话题，6–20字；displayable=false 时为空。 */
     private String topic;
+    /** 弹幕展示内容：原文超过50字时由 AI 提供的精简版（≤50字）；原文不超过50字时为空，直接使用原文。 */
+    private String simplifiedContent;
     /** 对 matchedEvent 匹配的置信度，0–100。 */
     private Integer confidence;
     /** 源语言代码，如 zh / en / ru。 */

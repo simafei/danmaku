@@ -92,7 +92,9 @@ public class DanmakuTemplateService {
      * @param userInput    用户正在输入的文字（可为空）
      */
     public List<DanmakuTemplate> recommend(String matchedEvent, String language, int limit, String userInput) {
-        List<DanmakuTemplate> pool = templateMapper.selectRandom(matchedEvent, language, RECOMMEND_POOL_SIZE);
+        // 将具体币对（如 BTCUSDT、btc_usdt）归一化为抽象交易事件 key，复用通用模板
+        String lookupEvent = TradingPairUtil.normalizeEvent(matchedEvent);
+        List<DanmakuTemplate> pool = templateMapper.selectRandom(lookupEvent, language, RECOMMEND_POOL_SIZE);
         if (pool.size() <= limit || !StringUtils.hasText(userInput)) {
             return pool.subList(0, Math.min(limit, pool.size()));
         }
@@ -160,8 +162,22 @@ public class DanmakuTemplateService {
     }
 
     private String userPrompt(String matchedEvent, String language, int count, int batchIndex) {
+        String eventDesc = toEventDescription(matchedEvent);
         return "话题事件：%s\n语言：%s\n请生成 %d 条弹幕模板（第 %d 批，风格与之前批次有所不同）。"
-                .formatted(matchedEvent, language, count, batchIndex);
+                .formatted(eventDesc, language, count, batchIndex);
+    }
+
+    /**
+     * 将抽象交易事件 key 转换为 AI 可理解的描述；其他事件原样返回。
+     */
+    private static String toEventDescription(String matchedEvent) {
+        if (TradingPairUtil.TRADING_PAIR_FUTURE.equals(matchedEvent)) {
+            return "加密货币合约交易（适用于任意合约/永续/杠杆币对，如 BTCUSDT、ETHUSDT）";
+        }
+        if (TradingPairUtil.TRADING_PAIR_SPOT.equals(matchedEvent)) {
+            return "加密货币现货交易（适用于任意现货币对，如 btc_usdt、eth_usdt）";
+        }
+        return matchedEvent;
     }
 
     /**

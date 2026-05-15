@@ -27,8 +27,12 @@ public class DanmakuPushService {
             TgRawMessage rawMessage,
             AiDanmakuResult aiResult,
             TgPushDecisionLog decisionLog) {
-        // 弹幕内容直接使用原始消息文本
+        // 弹幕内容：原文超过50字时使用 AI 精简版，否则使用原文
         String content = rawMessage.getNormalizedText();
+        String simplified = aiResult.getSimplifiedContent();
+        if (simplified != null && !simplified.isBlank()) {
+            content = simplified;
+        }
 
         DanmakuSendRequest request = new DanmakuSendRequest();
         request.setRawMessageId(rawMessage.getId());
