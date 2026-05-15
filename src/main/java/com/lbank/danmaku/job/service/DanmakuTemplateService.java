@@ -3,6 +3,8 @@ package com.lbank.danmaku.job.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.lbank.danmaku.job.client.AiDanmakuClient;
 import com.lbank.danmaku.job.domain.DanmakuTemplate;
 import com.lbank.danmaku.job.dto.AiPromptRequest;
@@ -10,11 +12,14 @@ import com.lbank.danmaku.job.dto.AiPromptResponse;
 import com.lbank.danmaku.job.mapper.DanmakuTemplateMapper;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -30,12 +35,21 @@ public class DanmakuTemplateService {
 
     /** 每次 AI 调用生成的条数。 */
     private static final int BATCH_SIZE = 50;
-    /** 推荐时从数据库随机拉取的候选池大小。 */
-    private static final int RECOMMEND_POOL_SIZE = 100;
     /** BM25 词频饱和参数，控制词频对分数的影响上限。 */
     private static final double BM25_K1 = 1.5;
     /** BM25 文档长度归一化参数。 */
     private static final double BM25_B = 0.75;
+
+    /**
+     * 预建的 BM25 语料索引，缓存全量模板及预计算的语料统计信息。
+     *
+     * <p>key 格式：{matchedEvent}:{language}，如 {@code __TRADING_PAIR_FUTURE__:zh}。
+     * 写入后 30 分钟过期；{@link #clear} 和 {@link #generate} 完成后主动失效。
+     */
+    private final Cache<String, TemplateIndex> indexCache = Caffeine.newBuilder()
+            .expireAfterWrite(30, TimeUnit.MINUTES)
+            .maximumSize(50)
+            .build();
 
     private final AiDanmakuClient aiDanmakuClient;
     private final DanmakuTemplateMapper templateMapper;
@@ -77,16 +91,18 @@ public class DanmakuTemplateService {
             }
         }
         log.info("弹幕模板生成完成 event={} lang={} saved={}", matchedEvent, language, saved);
+        // 新模板入库后失效缓存，下次请求重建索引
+        evictIndex(matchedEvent, language);
         return saved;
     }
 
     /**
      * 根据用户输入推荐弹幕模板。
      *
-     * <p>从数据库随机拉取 {@value RECOMMEND_POOL_SIZE} 条候选池，有输入时用 BM25 在内存中排序；
-     * 无输入或候选池不足时直接返回随机结果。
+     * <p>从内存索引（Caffeine 缓存）中检索全量候选，有输入时用 BM25 排序；
+     * 无输入时随机返回。首次请求时从数据库加载并预建索引，后续命中缓存。
      *
-     * @param matchedEvent 事件或交易对
+     * @param matchedEvent 事件或交易对；具体币对会先归一化为抽象 key
      * @param language     语言代码
      * @param limit        推荐条数，通常为 3
      * @param userInput    用户正在输入的文字（可为空）
@@ -94,11 +110,18 @@ public class DanmakuTemplateService {
     public List<DanmakuTemplate> recommend(String matchedEvent, String language, int limit, String userInput) {
         // 将具体币对（如 BTCUSDT、btc_usdt）归一化为抽象交易事件 key，复用通用模板
         String lookupEvent = TradingPairUtil.normalizeEvent(matchedEvent);
-        List<DanmakuTemplate> pool = templateMapper.selectRandom(lookupEvent, language, RECOMMEND_POOL_SIZE);
-        if (pool.size() <= limit || !StringUtils.hasText(userInput)) {
-            return pool.subList(0, Math.min(limit, pool.size()));
+        TemplateIndex index = loadIndex(lookupEvent, language);
+
+        if (index.templates().isEmpty()) {
+            return List.of();
         }
-        return rankBm25(userInput.trim(), pool, limit);
+        if (!StringUtils.hasText(userInput)) {
+            // 无输入时从全量模板中随机抽取
+            List<DanmakuTemplate> shuffled = new ArrayList<>(index.templates());
+            Collections.shuffle(shuffled);
+            return shuffled.subList(0, Math.min(limit, shuffled.size()));
+        }
+        return rankBm25(userInput.trim(), index, limit);
     }
 
     /**
@@ -112,9 +135,52 @@ public class DanmakuTemplateService {
      * 清空某个事件的所有模板（重新生成前调用）。
      */
     public int clear(String matchedEvent, String language) {
-        return templateMapper.delete(new LambdaQueryWrapper<DanmakuTemplate>()
+        int deleted = templateMapper.delete(new LambdaQueryWrapper<DanmakuTemplate>()
                 .eq(DanmakuTemplate::getMatchedEvent, matchedEvent)
                 .eq(DanmakuTemplate::getLanguage, language));
+        evictIndex(matchedEvent, language);
+        return deleted;
+    }
+
+    // ── 缓存管理 ──────────────────────────────────────────────────────
+
+    /**
+     * 加载或命中缓存的模板索引。
+     */
+    private TemplateIndex loadIndex(String event, String language) {
+        return indexCache.get(event + ":" + language, k -> buildIndex(event, language));
+    }
+
+    /**
+     * 从数据库加载全量模板并预建 BM25 语料索引。
+     *
+     * <p>预计算每个 bigram 的文档频率（DF）和平均文档长度（avgdl），
+     * 使后续每次查询只需计算查询词的 IDF，无需遍历整个语料库。
+     */
+    private TemplateIndex buildIndex(String event, String language) {
+        List<DanmakuTemplate> templates = templateMapper.selectAll(event, language);
+        log.info("构建模板索引 event={} lang={} size={}", event, language, templates.size());
+
+        List<List<String>> docTokens = templates.stream()
+                .map(t -> tokenize(t.getContent()))
+                .toList();
+
+        double avgdl = docTokens.stream().mapToInt(List::size).average().orElse(1.0);
+
+        // 预计算语料库中每个 bigram 出现在多少篇文档中（DF）
+        Map<String, Long> dfMap = new HashMap<>();
+        for (List<String> tokens : docTokens) {
+            new HashSet<>(tokens).forEach(t -> dfMap.merge(t, 1L, Long::sum));
+        }
+
+        return new TemplateIndex(templates, docTokens, avgdl, dfMap);
+    }
+
+    /**
+     * 主动失效指定 event/language 的缓存。
+     */
+    private void evictIndex(String event, String language) {
+        indexCache.invalidate(event + ":" + language);
     }
 
     // ── 私有方法 ─────────────────────────────────────────────────────
@@ -181,35 +247,31 @@ public class DanmakuTemplateService {
     }
 
     /**
-     * BM25 排序：对候选池中每条模板打分，返回得分最高的 limit 条。
-     *
-     * <p>词元化采用字符 bigram（连续两字符），适合中文和中英混合文本。
-     * 所有文本统一小写，去除空白后处理。
+     * BM25 排序：利用预建索引中的 DF 和 avgdl，对全量模板打分，返回得分最高的 limit 条。
      */
-    private List<DanmakuTemplate> rankBm25(String query, List<DanmakuTemplate> pool, int limit) {
+    private List<DanmakuTemplate> rankBm25(String query, TemplateIndex index, int limit) {
         List<String> queryTokens = tokenize(query);
         if (queryTokens.isEmpty()) {
-            return pool.subList(0, limit);
+            List<DanmakuTemplate> shuffled = new ArrayList<>(index.templates());
+            Collections.shuffle(shuffled);
+            return shuffled.subList(0, Math.min(limit, shuffled.size()));
         }
+
         Set<String> queryTerms = new LinkedHashSet<>(queryTokens);
-        int N = pool.size();
+        int N = index.templates().size();
 
-        // 对所有候选文档做词元化
-        List<List<String>> docTokens = pool.stream()
-                .map(t -> tokenize(t.getContent()))
-                .toList();
-
-        double avgdl = docTokens.stream().mapToInt(List::size).average().orElse(1.0);
-
-        // IDF：每个查询词在多少文档中出现
+        // 利用预计算的 DF 计算每个查询词的 IDF
         Map<String, Double> idf = new HashMap<>();
         for (String term : queryTerms) {
-            long df = docTokens.stream().filter(tokens -> tokens.contains(term)).count();
+            long df = index.dfMap().getOrDefault(term, 0L);
             idf.put(term, Math.log((N - df + 0.5) / (df + 0.5) + 1.0));
         }
 
-        // BM25 打分
+        // BM25 打分（docTokens 已预先词元化，无需重复计算）
+        List<List<String>> docTokens = index.docTokens();
+        double avgdl = index.avgdl();
         double[] scores = new double[N];
+
         for (int i = 0; i < N; i++) {
             List<String> tokens = docTokens.get(i);
             int dl = tokens.size();
@@ -228,7 +290,7 @@ public class DanmakuTemplateService {
         // 按分数降序取前 limit 条
         Integer[] order = IntStream.range(0, N).boxed().toArray(Integer[]::new);
         Arrays.sort(order, (a, b) -> Double.compare(scores[b], scores[a]));
-        return Arrays.stream(order).limit(limit).map(pool::get).toList();
+        return Arrays.stream(order).limit(limit).map(index.templates()::get).toList();
     }
 
     /**
@@ -280,4 +342,20 @@ public class DanmakuTemplateService {
         }
         return result;
     }
+
+    // ── 内部数据结构 ──────────────────────────────────────────────────
+
+    /**
+     * 预建的 BM25 语料索引。
+     *
+     * @param templates 全量模板列表
+     * @param docTokens 与 templates 一一对应的 bigram 词元列表（预计算，避免重复分词）
+     * @param avgdl     语料库平均文档长度（bigram 数）
+     * @param dfMap     bigram → 包含该 bigram 的文档数（预计算 DF，查询时直接用）
+     */
+    private record TemplateIndex(
+            List<DanmakuTemplate> templates,
+            List<List<String>> docTokens,
+            double avgdl,
+            Map<String, Long> dfMap) {}
 }

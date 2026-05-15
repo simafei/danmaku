@@ -11,13 +11,12 @@ import org.apache.ibatis.annotations.Select;
 public interface DanmakuTemplateMapper extends BaseMapper<DanmakuTemplate> {
 
     /**
-     * 随机返回指定事件和语言的模板。
+     * 返回指定事件和语言的全量模板，供内存缓存使用。
      */
-    @Select("SELECT * FROM danmaku_template WHERE matched_event = #{matchedEvent} AND language = #{language} ORDER BY RAND() LIMIT #{limit}")
-    List<DanmakuTemplate> selectRandom(
+    @Select("SELECT * FROM danmaku_template WHERE matched_event = #{matchedEvent} AND language = #{language}")
+    List<DanmakuTemplate> selectAll(
             @Param("matchedEvent") String matchedEvent,
-            @Param("language") String language,
-            @Param("limit") int limit);
+            @Param("language") String language);
 
     /**
      * 查询指定事件已有的模板数量。
