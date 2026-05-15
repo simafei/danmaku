@@ -12,8 +12,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.web.client.RestTemplateBuilder;
-import org.springframework.web.client.RestTemplate;
+import okhttp3.OkHttpClient;
 
 /**
  * AI 消息过滤 + 事件匹配集成测试（OpenAI 兼容接口）。
@@ -54,10 +53,10 @@ class AiDanmakuGenerateTest {
         props.getAi().setTemperature(0.4);
         props.getAi().setResponseFormat("json_object");
 
-        RestTemplate restTemplate = new RestTemplateBuilder().build();
+        OkHttpClient httpClient = new OkHttpClient.Builder().build();
         ObjectMapper objectMapper = new ObjectMapper();
 
-        OpenAiCompatibleDanmakuClient client = new OpenAiCompatibleDanmakuClient(props, restTemplate, objectMapper);
+        OpenAiCompatibleDanmakuClient client = new OpenAiCompatibleDanmakuClient(props, httpClient, objectMapper);
         // 测试用事件列表：混合了加密货币交易对和非加密事件，验证通用匹配能力
         List<String> testEvents = List.of(
                 "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT",

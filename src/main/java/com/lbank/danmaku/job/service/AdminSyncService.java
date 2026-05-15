@@ -1,16 +1,19 @@
 package com.lbank.danmaku.job.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lbank.danmaku.job.config.DanmakuProperties;
 import com.lbank.danmaku.job.domain.TgGroupConfig;
 import com.lbank.danmaku.job.mapper.TgGroupConfigMapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xxl.job.core.context.XxlJobHelper;
 import com.xxl.job.core.handler.annotation.XxlJob;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -18,7 +21,6 @@ import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import org.springframework.web.client.RestTemplate;
 
 /**
  * 从 Telegram Bot API 同步各群的管理员列表，写入 Redis 供 AdminCacheService 使用。
@@ -30,14 +32,13 @@ import org.springframework.web.client.RestTemplate;
 public class AdminSyncService {
     private static final Logger log = LoggerFactory.getLogger(AdminSyncService.class);
     private static final Duration ADMIN_TTL = Duration.ofHours(2);
-    private static final String TG_API_URL =
-            "https://api.telegram.org/bot{token}/getChatAdministrators?chat_id={chatId}";
+    private static final String TG_API_BASE = "https://api.telegram.org";
 
     private final DanmakuProperties properties;
     private final TgGroupConfigMapper groupConfigMapper;
     private final AdminCacheService adminCacheService;
     private final StringRedisTemplate redisTemplate;
-    private final RestTemplate restTemplate;
+    private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
 
     public AdminSyncService(
@@ -45,13 +46,13 @@ public class AdminSyncService {
             TgGroupConfigMapper groupConfigMapper,
             AdminCacheService adminCacheService,
             StringRedisTemplate redisTemplate,
-            RestTemplate restTemplate,
+            OkHttpClient httpClient,
             ObjectMapper objectMapper) {
         this.properties = properties;
         this.groupConfigMapper = groupConfigMapper;
         this.adminCacheService = adminCacheService;
         this.redisTemplate = redisTemplate;
-        this.restTemplate = restTemplate;
+        this.httpClient = httpClient;
         this.objectMapper = objectMapper;
     }
 
@@ -94,8 +95,20 @@ public class AdminSyncService {
     /** 同步单个群的管理员，返回写入 Redis 的管理员数量 */
     public int syncGroup(Long groupId) {
         String token = properties.getTelegram().getBotToken();
-        String responseBody = restTemplate.getForObject(
-                TG_API_URL, String.class, token, groupId);
+        String url = TG_API_BASE + "/bot" + token + "/getChatAdministrators?chat_id=" + groupId;
+        Request request = new Request.Builder().url(url).get().build();
+
+        String responseBody = null;
+        try (Response response = httpClient.newCall(request).execute()) {
+            responseBody = response.body() != null ? response.body().string() : null;
+            if (!response.isSuccessful()) {
+                log.warn("Telegram API returned HTTP {} for groupId={}: {}", response.code(), groupId, responseBody);
+                return 0;
+            }
+        } catch (Exception e) {
+            log.error("Failed to call getChatAdministrators for groupId={}", groupId, e);
+            return 0;
+        }
 
         List<Long> adminIds = parseAdminIds(responseBody);
         for (Long userId : adminIds) {
